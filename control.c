@@ -18,12 +18,12 @@ void clearScreen(){
     printf("\x1b[3J\x1b[H\x1b[2J");
 }
 
-void AnglePrompt(){
+void getAngles(){
 
 }
 
-void MotorChooser() {
-    
+void getMotor() {
+
 }
 
 void InverseKinematicsCalculations(){
@@ -126,11 +126,11 @@ void rawDataMenu(){
 
     if (scanf("%d", &choice) == 1 && choice == 1) {
         clearScreen();
-        AnglePrompt();
+        getAngles();
     }
     else if (choice == 2) {
         clearScreen();
-        MotorChooser();
+        getMotor();
     }
     else {
         clearScreen();
