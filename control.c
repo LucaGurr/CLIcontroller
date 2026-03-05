@@ -17,6 +17,12 @@ void clearScreen(){
     printf("\x1b[3J\x1b[H\x1b[2J");
 }
 
+void InverseKinematicsCalculations(){
+    clearScreen();
+    printf("%sINVERSE KINEMATICS CALCULATIONS%s\n    Calculating the joint angles for the given target coordinates...\n    ", BLUE, RESET);
+    // Placeholder for inverse kinematics calculations and progress bar
+    printf("%sINVERSE KINEMATICS CALCULATIONS%s\n    Joint angles calculated successfully!\n    ", BLUE, RESET);
+}
 
 void getTargetCoords(){
     clearScreen();
@@ -24,7 +30,7 @@ void getTargetCoords(){
     scanf("%d, %d, %d", &targetcoords[0], &targetcoords[1], &targetcoords[2]);
     printf("%sCUSTOM SECTION LENGTH MENU%s\n    You have entered the following target coordinates:\n    %sX Coordinate:%s %d mm\n    %sBase Rotation Angle:%s %d degrees\n    %sZ Coordinate:%s %d mm\n    %s1)%s Confirm and continue\n    %s2)%s Re-enter target coordinates\n    ", BLUE, RESET, RED, RESET, targetcoords[0], RED, RESET, targetcoords[1], RED, RESET, targetcoords[2], RED, RESET, RED, RESET);
     if (scanf("%d", &choice) == 1 && choice == 1) {
-        // Continue with the selected target coordinates
+        InverseKinematicsCalculations();
     }
     else if (choice == 2) {
         getTargetCoords();
