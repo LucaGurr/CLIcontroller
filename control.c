@@ -50,7 +50,7 @@ void getCoords(){
         getTargetCoords();
     }
     else if (choice == 2) {
-        getInitialCoords();
+        getCoords();
     }
     else {
         clearScreen();
