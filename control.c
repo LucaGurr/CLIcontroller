@@ -11,10 +11,19 @@ int choice;
 int lengths[2] = {500, 525};
 int initcoords[3] = {0};
 int targetcoords[3] = {0};
+int rotate[4] = {1};
 
 
 void clearScreen(){
     printf("\x1b[3J\x1b[H\x1b[2J");
+}
+
+void AnglePrompt(){
+
+}
+
+void MotorChooser() {
+    
 }
 
 void InverseKinematicsCalculations(){
@@ -116,10 +125,12 @@ void rawDataMenu(){
     printf("%sRAW DATA MENU%s:\n    %s1)%s Use All Motors\n    %s2)%s Use custom Motors\n    ", BLUE, RESET, RED, RESET, RED, RESET);
 
     if (scanf("%d", &choice) == 1 && choice == 1) {
-        
-    } 
+        clearScreen();
+        AnglePrompt();
+    }
     else if (choice == 2) {
-
+        clearScreen();
+        MotorChooser();
     }
     else {
         clearScreen();
