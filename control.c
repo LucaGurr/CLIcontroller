@@ -96,7 +96,7 @@ void inverseKinematicsMenu() {
 
     clearScreen();
 
-    printf("%sINVERSE KINEMATICS MENU%s:\n    %s1)%s Use defauls section Lengths\n    %s2)%s Use custom section Lengths\n    ", BLUE, RESET, RED, RESET, RED, RESET);
+    printf("%sINVERSE KINEMATICS MENU%s:\n    %s1)%s Use default section Lengths\n    %s2)%s Use custom section Lengths\n    ", BLUE, RESET, RED, RESET, RED, RESET);
     if (scanf("%d", &choice) == 1 && choice == 1) {
         defaultSecLenMenu();
     } 
