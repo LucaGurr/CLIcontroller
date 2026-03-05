@@ -1,5 +1,14 @@
 #include "stdio.h"
+
+#define BLUE "\x1b[34m"
+#define RED "\x1b[31m"
+#define GREEN "\x1b[32m"
+#define YELLOW "\x1b[33m"
+#define RESET "\x1b[0m"
+
 int choice;
+
+int lengths[2] = {500, 525};
 
 void clearScreen(){
     printf("\x1b[3J\x1b[H\x1b[2J");
@@ -11,6 +20,19 @@ void defaultSecLenMenu(){
 
 void customSecLenMenu() {
     clearScreen();
+
+    int tempLengths[2] = {0};
+
+    printf("%sCUSTOM SECTION LENGTH MENU%s\n    Please enter the lower section length below (mm):\n    ", BLUE, RESET);
+    scanf("%d", &tempLengths[0]);
+
+    clearScreen();
+
+    printf("%sCUSTOM SECTION LENGTH MENU%s\n    Please enter the upper section length below (mm):\n    ", BLUE, RESET);
+    scanf("%d", &tempLengths[0]);
+
+    clearScreen();
+
 }
 
 
@@ -18,11 +40,12 @@ void inverseKinematicsMenu() {
 
     clearScreen();
 
-    printf("INVERSE KINEMATICS MENU:\n    1) Use defauls section Lengths\n    2) Use custom section Lengths\n");
+    printf("%sINVERSE KINEMATICS MENU%s:\n    %s1)%s Use defauls section Lengths\n    %s2)%s Use custom section Lengths\n    ", BLUE, RESET, RED, RESET, RED, RESET);
     if (scanf("%d", &choice) == 1 && choice == 1) {
-        
+        defaultSecLenMenu();
     } 
     else if (choice == 2) {
+        customSecLenMenu();
     }
     else {
         printf("navn\n");
@@ -34,7 +57,7 @@ void rawDataMenu(){
 
     clearScreen();
 
-    printf("RAW DATA MENU:\n    1) Use All Motors\n    2) Use custom Motors\n");
+    printf("%sRAW DATA MENU%s:\n    %s1)%s Use All Motors\n    %s2)%s Use custom Motors\n    ", BLUE, RESET, RED, RESET, RED, RESET);
 
     if (scanf("%d", &choice) == 1 && choice == 1) {
         
@@ -43,6 +66,7 @@ void rawDataMenu(){
 
     }
     else {
+        clearScreen();
         printf("navn\n");
     }
 
@@ -53,7 +77,7 @@ void menuStructure(){
 
     clearScreen();
 
-    printf("MAIN MENU\n    1) choose inverse Kinematics mode\n    2) choose raw movement data mode\n");
+    printf("%sMAIN MENU%s\n    %s1)%s choose inverse Kinematics mode\n    %s2)%s choose raw movement data mode\n    ", BLUE, RESET, RED, RESET, RED, RESET);
     if (scanf("%d", &choice) == 1 && choice == 1) {
         inverseKinematicsMenu();
     } 
