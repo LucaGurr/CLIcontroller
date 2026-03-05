@@ -11,8 +11,9 @@ int choice;
 int lengths[2] = {500, 525};
 int initcoords[3] = {0};
 int targetcoords[3] = {0};
-int rotate[4] = {1};
 
+int rotate[4] = {1};
+int angles[4] = {0};
 
 void clearScreen(){
     printf("\x1b[3J\x1b[H\x1b[2J");
@@ -159,6 +160,5 @@ void menuStructure(){
 int main() {
     
     menuStructure();
-
     return 0;
 }
