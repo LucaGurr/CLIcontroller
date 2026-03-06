@@ -38,12 +38,12 @@ void InverseKinematicsCalculations(){
     printf("%sINVERSE KINEMATICS CALCULATIONS%s\n", BLUE, RESET);
     printf("    Calculating the joint angles for the given target coordinates...\n\n");
 
-    double L1 = (double)lengths[0];
-    double L2 = (double)lengths[1];
+    double L1 =             (double)lengths[0];
+    double L2 =             (double)lengths[1];
     
-    double x = (double)targetcoords[0];
-    double baseAngle = (double)targetcoords[1];
-    double z = (double)targetcoords[2];
+    double x =              (double)targetcoords[0];
+    double baseAngle =      (double)targetcoords[1];
+    double z =              (double)targetcoords[2];
 
     double dist = sqrt(x * x + z * z);
 
@@ -75,7 +75,7 @@ void InverseKinematicsCalculations(){
     angles[1] = ((int)(q1 * 180.0 / PI)) * 16;      //shoulder needs 16:1 gearbox scaling
     angles[2] = ((int)(q2 * 180.0 / PI)) * 16;      //elbow needs 16:1 gearbox scaling
 
-
+    clearScreen();
     printf("%sINVERSE KINEMATICS CALCULATIONS%s", BLUE, RESET);
     printf("    %sCalculated Angles:%s\n", GREEN, RESET);
     printf("    Base (Rot): %d deg\n", angles[0]);
@@ -86,6 +86,7 @@ void InverseKinematicsCalculations(){
     printf("    %sPress any key to continue...%s\n", YELLOW, RESET);
     getchar(); getchar();
     
+    clearScreen();
     printf("%sINVERSE KINEMATICS CALCULATIONS%s\n    Joint angles calculated successfully!\n", BLUE, RESET);
     printf("    Do you want to pass on the angles to the Driver?\n");
     printf("    %s1)%s Yes, pass angles to Driver\n    %s2)%s No, return to Main Menu\n    ", RED, RESET, RED, RESET);
@@ -182,5 +183,6 @@ void menuStructure(){
 
 int main() {
     menuStructure();
+    clearScreen();
     return 0;
 }
