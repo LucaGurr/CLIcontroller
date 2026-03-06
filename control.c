@@ -44,6 +44,8 @@ void InverseKinematicsCalculations(){
 
     double dist = sqrt(x * x + z * z);
 
+
+    //OOR handler
     if (dist > (L1 + L2) || dist < fabs(L1 - L2)) {
         printf("%sERROR:%s Target (%.0f, %.0f) out of reach!\n", RED, RESET, x, z);
         printf("    Max reach: %.0f mm, Target distance: %.2f mm\n", L1 + L2, dist);
