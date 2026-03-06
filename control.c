@@ -54,6 +54,11 @@ void InverseKinematicsCalculations(){
 
     // cos(q2) = (dist^2 - L1^2 - L2^2) / (2 * L1 * L2)
     double cosQ2 = (dist * dist - L1 * L1 - L2 * L2) / (2.0 * L1 * L2);
+
+    // Clamp to valid acos domain [-1, 1] to guard against floating-point drift
+    if (cosQ2 > 1.0)  cosQ2 =  1.0;
+    if (cosQ2 < -1.0) cosQ2 = -1.0;
+
     double q2 = acos(cosQ2);
 
     double q1 = atan2(z, x) - atan2(L2 * sin(q2), L1 + L2 * cos(q2));
@@ -109,9 +114,22 @@ void getTargetCoords(){
 void getCoords(){
     clearScreen();
     printf("%sINITIAL COORDINATES MENU%s\n", BLUE, RESET);
-    printf("    Enter initial (x, y, z): ");
-    scanf("%d, %d, %d", &initcoords[0], &initcoords[1], &initcoords[2]);
-    getTargetCoords();
+    printf("    Please enter coordinates (x, y, z):\n");
+    printf("    x,z = mm, y = degrees base rotation\n    Input format: x, y, z\n    ");
+
+    if(scanf("%d, %d, %d", &initcoords[0], &initcoords[1], &initcoords[2]) != 3) {
+        printf("Invalid input format.\n");
+        return;
+    }
+
+    printf("\n    %sX (Horizontal):%s %d mm\n", RED, RESET, initcoords[0]);
+    printf("    %sBase Angle (Y):%s %d deg\n", RED, RESET, initcoords[1]);
+    printf("    %sZ (Height):    %s %d mm\n", RED, RESET, initcoords[2]);
+    printf("\n    %s1)%s Confirm and continue\n    %s2)%s Re-enter\n    ", RED, RESET, RED, RESET);
+
+    scanf("%d", &choice);
+    if (choice == 1) getTargetCoords();
+    else if (choice == 2) getCoords();
 }
 
 void customSecLenMenu() {
