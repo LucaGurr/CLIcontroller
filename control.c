@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <math.h>
-#include <stdlib.h>
 
 #define BLUE "\x1b[34m"
 #define RED "\x1b[31m"
@@ -10,24 +9,28 @@
 #define PI 3.14159265358979323846
 
 void menuStructure();
+void getTargetCoords();
 
 int choice;
 
-int lengths[2] = {500, 525};
-int initcoords[3] = {0};
-int targetcoords[3] = {0};
-
-int angles[4] = {0}; // [0]: Base, [1]: Shoulder, [2]: Elbow
+int lengths         [2] = {[0] = 500, [1] = 525};
+int initcoords      [3] = {0};
+int targetcoords    [3] = {0};
+int motors          [4] = {0}; // replacement for bool 0 = false/nC 1 = true/iC
+int angles          [4] = {0}; // [0]: Base, [1]: Shoulder, [2]: Elbow ,[3]: End effector
 
 void clearScreen(){
     printf("\x1b[3J\x1b[H\x1b[2J");
 }
 
 void passAnglesToDriver() {
+    clearScreen();
+    printf("%sDRIVER PASSING%s", BLUE, RESET);
     printf("    (Simulated) Passing angles to Driver...\n");
     printf("    Base: %d deg, Shoulder: %d deg, Elbow: %d deg\n", angles[0], angles[1], angles[2]);
     printf("    %sPress any key to return to Main Menu...%s\n", YELLOW, RESET);
     getchar(); getchar();
+    menuStructure();
 }
 
 void InverseKinematicsCalculations(){
@@ -47,10 +50,13 @@ void InverseKinematicsCalculations(){
 
     //OOR handler
     if (dist > (L1 + L2) || dist < fabs(L1 - L2)) {
+        clearScreen();
+        printf("%sOOR EXCEPTION%s", RED, RESET);
         printf("%sERROR:%s Target (%.0f, %.0f) out of reach!\n", RED, RESET, x, z);
         printf("    Max reach: %.0f mm, Target distance: %.2f mm\n", L1 + L2, dist);
         printf("    Press any key to return...");
         getchar(); getchar();
+        getTargetCoords();
         return;
     }
 
@@ -69,6 +75,8 @@ void InverseKinematicsCalculations(){
     angles[1] = ((int)(q1 * 180.0 / PI)) * 16;      //shoulder needs 16:1 gearbox scaling
     angles[2] = ((int)(q2 * 180.0 / PI)) * 16;      //elbow needs 16:1 gearbox scaling
 
+
+    printf("%sINVERSE KINEMATICS CALCULATIONS%s", BLUE, RESET);
     printf("    %sCalculated Angles:%s\n", GREEN, RESET);
     printf("    Base (Rot): %d deg\n", angles[0]);
     printf("    Shoulder:   %d deg\n", angles[1]);
