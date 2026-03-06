@@ -25,7 +25,7 @@ void clearScreen(){
 
 void passAnglesToDriver() {
     clearScreen();
-    printf("%sDRIVER PASSING%s", BLUE, RESET);
+    printf("%sDRIVER PASSING%s\n", BLUE, RESET);
     printf("    (Simulated) Passing angles to Driver...\n");
     printf("    Base: %d deg, Shoulder: %d deg, Elbow: %d deg\n", angles[0], angles[1], angles[2]);
     printf("    %sPress any key to return to Main Menu...%s\n", YELLOW, RESET);
@@ -51,7 +51,7 @@ void InverseKinematicsCalculations(){
     //OOR handler
     if (dist > (L1 + L2) || dist < fabs(L1 - L2)) {
         clearScreen();
-        printf("%sOOR EXCEPTION%s", RED, RESET);
+        printf("%sOOR EXCEPTION%s\n", RED, RESET);
         printf("%sERROR:%s Target (%.0f, %.0f) out of reach!\n", RED, RESET, x, z);
         printf("    Max reach: %.0f mm, Target distance: %.2f mm\n", L1 + L2, dist);
         printf("    Press any key to return...");
@@ -76,7 +76,7 @@ void InverseKinematicsCalculations(){
     angles[2] = ((int)(q2 * 180.0 / PI)) * 16;      //elbow needs 16:1 gearbox scaling
 
     clearScreen();
-    printf("%sINVERSE KINEMATICS CALCULATIONS%s", BLUE, RESET);
+    printf("%sINVERSE KINEMATICS CALCULATIONS%s\n", BLUE, RESET);
     printf("    %sCalculated Angles:%s\n", GREEN, RESET);
     printf("    Base (Rot): %d deg\n", angles[0]);
     printf("    Shoulder:   %d deg\n", angles[1]);
