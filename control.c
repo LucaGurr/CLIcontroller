@@ -13,11 +13,13 @@ void getTargetCoords();
 
 int choice;
 
-int lengths         [2] = {[0] = 500, [1] = 525};
+int lengths         [2] = {500, 525};
 int initcoords      [3] = {0};
 int targetcoords    [3] = {0};
 int motors          [4] = {0}; // replacement for bool 0 = false/nC 1 = true/iC
 int angles          [4] = {0}; // [0]: Base, [1]: Shoulder, [2]: Elbow ,[3]: End effector
+int motorPins       [4][2] = {{0, 0}, {0, 0}, {0, 0}, {0, 0}};
+
 
 void clearScreen(){
     printf("\x1b[3J\x1b[H\x1b[2J");
