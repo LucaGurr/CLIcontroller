@@ -84,18 +84,22 @@ These are defined as `#define` constants in `control.c` (`MOTOR1_STEP_PIN`, `MOT
 
 ## GPIO Driver Layer
 
-The program talks to GPIO through the Linux sysfs interface (`/gpio/` in Docker, `/sys/class/gpio/` on real hardware). The path prefix is controlled by the `GPIO_BASE_PATH` macro. The driver layer consists of four functions:
+The program talks to GPIO through the Linux sysfs interface. The path prefix is controlled by the `GPIO_BASE_PATH` macro, which defaults to `/sys/class/gpio` (the real Pi path). For the Docker simulation it is overridden at compile time with `-DGPIO_BASE_PATH='"/gpio"'`.
+
+The driver layer consists of six functions:
 
 - **`gpio_export(pin)`** — Writes the pin number to `GPIO_BASE_PATH/export` to request the kernel (or simulator) to create the `gpioN/` directory. Skips if the directory already exists (checked via `access()`).
+- **`gpio_unexport(pin)`** — Writes the pin number to `GPIO_BASE_PATH/unexport` to release the pin back to the kernel after use.
 - **`gpio_set_direction(pin, dir)`** — Writes `"out"` or `"in"` to `gpioN/direction`.
 - **`gpio_write(pin, value)`** — Writes `0` or `1` to `gpioN/value`. This is the function called hundreds of times per motor movement to pulse STEP pins.
+- **`gpio_read(pin)`** — Reads and returns the current value (`0` or `1`) from `gpioN/value`. Returns `-1` on error.
 - **`log_activity(fmt, ...)`** — A `printf`-style variadic function that appends a line to `GPIO_BASE_PATH/activity.log`. The GPIO monitor container tails this file in real time.
 
 The init/cleanup lifecycle:
 
 1. **`gpio_init()`** — Called at the start of `passAnglesToDriver()`. Exports all 8 pins, sets them all to output mode, and writes 0 (LOW) to every pin.
 2. **`step_motor(motor_id, step_pin, dir_pin, angle_deg)`** — Sets the DIR pin based on angle sign, then pulses the STEP pin `steps` times with `STEP_DELAY_US` between each transition.
-3. **`gpio_cleanup()`** — Writes 0 to all 8 pins after all motors have finished moving.
+3. **`gpio_cleanup()`** — Writes 0 to all 8 pins and unexports each one after all motors have finished moving.
 
 Every init, drive, completion, and cleanup event is logged to `activity.log` with a structured prefix (`INIT:`, `DRIVE:`, `DONE:`, `CLEANUP:`) that the monitor parses for color-coded display.
 
@@ -110,7 +114,13 @@ gcc -o control control.c -lm
 ./control
 ```
 
-`-lm` is required for math functions (`sqrt`, `acos`, `atan2`, `sin`, `cos`, `fabs`). When run natively, GPIO writes will silently fail (no `/gpio/` directory exists), but all IK math and menu navigation works normally.
+`-lm` is required for math functions (`sqrt`, `acos`, `atan2`, `sin`, `cos`, `fabs`). This uses the default `GPIO_BASE_PATH` of `/sys/class/gpio`, which is the correct path on a Raspberry Pi. When run on a machine without a GPIO sysfs tree, all GPIO writes silently fail but all IK math and menu navigation works normally.
+
+To build with the Docker simulation path instead:
+
+```bash
+gcc -o control control.c -lm -DGPIO_BASE_PATH='"/gpio"'
+```
 
 ### Docker with GPIO Simulation
 
