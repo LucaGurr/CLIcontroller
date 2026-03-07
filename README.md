@@ -260,19 +260,3 @@ CLIcontroller/
 ├── AGENTS.md            # AI coding assistant context
 └── README.md            # this file
 ```
-
-## Future Plans
-
-The current implementation computes joint angles and drives simulated GPIO pins. The next major milestone is running on real hardware. This is tracked across several GitHub issues:
-
-- **GPIO Hardware Abstraction** ([#1](https://github.com/LucaGurr/CLIcontroller/issues/1)) — A swappable GPIO layer (real hardware via `libgpiod` or simulation via sysfs files) with platform detection, so the code runs on any Linux box during development and on a target SBC for deployment.
-
-- **A4988 Stepper Driver Interface** ([#2](https://github.com/LucaGurr/CLIcontroller/issues/2)) — The core hardware interface. Pin assignments stored as a 2D array `pinout[4][2]` (step pin, dir pin per motor). Functions for initializing drivers, pulsing steps with correct A4988 timing (≥1 µs pulse width, ≥200 ns DIR setup), and optional ENABLE/SLEEP pin support.
-
-- **Angle-to-Steps Conversion** ([#3](https://github.com/LucaGurr/CLIcontroller/issues/3)) — Translating the IK output (degrees) into discrete step counts for the A4988. This involves per-motor config (steps/rev, microstepping mode, gear ratio) and tracking current position in steps for delta computation.
-
-- **Motion Control & Trajectory** ([#4](https://github.com/LucaGurr/CLIcontroller/issues/4)) — Moving beyond "teleport to position": acceleration ramps (trapezoidal), coordinated multi-axis movement so all joints finish simultaneously, speed control, and eventually a homing sequence.
-
-- **Safety & Signal Handling** ([#5](https://github.com/LucaGurr/CLIcontroller/issues/5)) — Software joint limits, SIGINT/SIGTERM handlers for clean GPIO shutdown, emergency stop support, and endstop inputs.
-
-- **Build System & Config** ([#6](https://github.com/LucaGurr/CLIcontroller/issues/6)) — A Makefile with `-DSIMULATION` flag, pin configuration headers (`pinout.h`, `motor_config.h`), and eventually splitting the single-file architecture into separate modules.
