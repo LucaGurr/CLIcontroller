@@ -103,6 +103,78 @@ The init/cleanup lifecycle:
 
 Every init, drive, completion, and cleanup event is logged to `activity.log` with a structured prefix (`INIT:`, `DRIVE:`, `DONE:`, `CLEANUP:`) that the monitor parses for color-coded display.
 
+## Simultaneous Motor Drive
+
+All three motors (base, shoulder, elbow) move at the same time. Before executing, the program generates a repeating tick pattern and displays it for confirmation.
+
+### Pattern Generation
+
+The algorithm computes the smallest repeating section that, when tiled, produces exactly the required step count for each motor.
+
+**Step 1 — Compute GCD and section parameters:**
+
+```
+g            = gcd(steps_m1, steps_m2, steps_m3)
+section_len  = max_steps / g
+repetitions  = g
+```
+
+For example, with steps `600 / 300 / 100`:
+
+```
+g = gcd(600, 300, 100) = 100
+section_len = 600 / 100 = 6
+repetitions = 100
+```
+
+**Step 2 — Distribute each motor's steps across the section (Bresenham):**
+
+Each motor gets `total_steps / g` steps spread evenly across `section_len` ticks using the Bresenham line algorithm:
+
+```
+error = section_len / 2
+for each tick:
+    error -= steps_in_section
+    if error < 0:
+        pulse this tick  (green block)
+        error += section_len
+    else:
+        skip this tick   (red block)
+```
+
+The motor with the most steps always fills the entire section (steps every tick). Slower motors step at evenly distributed intervals. If the step counts share no common factor (e.g. primes like `7 / 5 / 3`), `g = 1`, so `section_len = max_steps` and the pattern runs exactly once.
+
+Continuing the 600/300/100 example:
+
+```
+Motor 1 (Base):      ██████  6 of 6 ticks  ×  100 reps  =  600 steps
+Motor 2 (Shoulder):  ░█░█░█  3 of 6 ticks  ×  100 reps  =  300 steps
+Motor 3 (Elbow):     ░░░█░░  1 of 6 ticks  ×  100 reps  =  100 steps
+```
+
+**Step 3 — Verification:**
+
+After generation the program counts steps in each pattern and multiplies by repetitions. If any count doesn't match the target, the pattern is regenerated with a different Bresenham starting error. Three offsets are tried (`section_len/2`, `0`, `section_len-1`) before aborting with an error.
+
+**Step 4 — Confirmation display:**
+
+The section is printed with ANSI colored full-block characters: green (█) for a step tick, red (█) for a skipped tick. If `section_len` exceeds 60, the display is truncated. Section length, repetition count, and per-motor step totals are shown. The user confirms before execution starts.
+
+**Step 5 — Execution:**
+
+Direction pins for all motors are set first, then the nested loop runs:
+
+```
+for each repetition:
+    for each tick in section:
+        HIGH on all step_pins that step this tick  (simultaneously)
+        wait STEP_DELAY_US
+        LOW  on all step_pins that step this tick  (simultaneously)
+        wait STEP_DELAY_US
+```
+
+This is implemented in `driveMotorsSimultaneous()`, called from `passAnglesToDriver()`. The function takes arrays of step counts, directions, step pins, and dir pins, so it is not hardcoded to a specific number of motors.
+
 ## Build & Run
 
 ### Native (no GPIO simulation)

@@ -24,8 +24,10 @@
 #define GPIO_BASE_PATH "/sys/class/gpio"
 #endif
 
-#define STEPS_PER_REV  200
-#define STEP_DELAY_US  15000
+#define STEPS_PER_REV      200
+#define STEP_DELAY_US      15000
+#define MAX_MOTORS         4
+#define DISPLAY_LINE_WIDTH 64
 
 static const int ALL_PINS[] = {
     MOTOR1_STEP_PIN, MOTOR1_DIR_PIN,
@@ -122,51 +124,207 @@ void gpio_cleanup(void) {
     log_activity("CLEANUP: All pins reset to LOW and unexported");
 }
 
-void step_motor(int motor_id, int step_pin, int dir_pin, int angle_deg) {
-    static const char *names[] = {"Base", "Shoulder", "Elbow", "End Effector"};
-    int direction = (angle_deg >= 0) ? 1 : 0;
-    int abs_angle = abs(angle_deg);
-    int steps     = (int)((double)abs_angle * STEPS_PER_REV / 360.0);
+static int gcd2(int a, int b) {
+    if (a < 0) a = -a;
+    if (b < 0) b = -b;
+    while (b) { int t = b; b = a % b; a = t; }
+    return a;
+}
 
-    log_activity("DRIVE: Motor %d (%s) | DIR=%s | Steps=%d | Angle=%ddeg",
-                 motor_id + 1, names[motor_id],
-                 direction ? "CW" : "CCW", steps, angle_deg);
+static int gcd_nonzero(int *arr, int n) {
+    int g = 0;
+    for (int i = 0; i < n; i++)
+        if (arr[i] > 0) g = gcd2(g, arr[i]);
+    return (g == 0) ? 1 : g;
+}
 
-    printf("      GPIO %d DIR=%s, GPIO %d pulsing %d steps...\n",
-           dir_pin, direction ? "CW" : "CCW", step_pin, steps);
+static void fill_bresenham(int *pat, int n, int k, int error_init) {
+    int error = error_init;
+    for (int i = 0; i < n; i++) {
+        error -= k;
+        if (error < 0) { pat[i] = 1; error += n; }
+        else            { pat[i] = 0; }
+    }
+}
 
-    gpio_write(dir_pin, direction);
-    usleep(STEP_DELAY_US);
+static int count_pattern(int *pat, int n) {
+    int c = 0;
+    for (int i = 0; i < n; i++) c += pat[i];
+    return c;
+}
 
-    for (int i = 0; i < steps; i++) {
-        gpio_write(step_pin, 1);
-        usleep(STEP_DELAY_US);
-        gpio_write(step_pin, 0);
-        usleep(STEP_DELAY_US);
+static int buildPatterns(int *step_counts, int n_motors,
+                         int **patterns, int *section_len_out, int *reps_out) {
+    int max_steps = 0;
+    for (int m = 0; m < n_motors; m++)
+        if (step_counts[m] > max_steps) max_steps = step_counts[m];
+
+    if (max_steps == 0) { *section_len_out = 0; *reps_out = 0; return 1; }
+
+    int g           = gcd_nonzero(step_counts, n_motors);
+    int section_len = max_steps / g;
+    int reps        = g;
+
+    for (int m = 0; m < n_motors; m++) {
+        patterns[m] = calloc(section_len, sizeof(int));
+        if (!patterns[m]) {
+            for (int j = 0; j < m; j++) free(patterns[j]);
+            return 0;
+        }
     }
 
-    log_activity("DONE: Motor %d (%s) | %d steps complete",
-                 motor_id + 1, names[motor_id], steps);
+    int error_inits[] = { section_len / 2, 0, section_len - 1 };
+    int n_inits = (int)(sizeof(error_inits) / sizeof(error_inits[0]));
+
+    for (int attempt = 0; attempt < n_inits; attempt++) {
+        int ok = 1;
+        for (int m = 0; m < n_motors; m++) {
+            fill_bresenham(patterns[m], section_len, step_counts[m] / g, error_inits[attempt]);
+            if (count_pattern(patterns[m], section_len) != step_counts[m] / g) { ok = 0; break; }
+        }
+        if (ok) break;
+    }
+
+    for (int m = 0; m < n_motors; m++) {
+        if (count_pattern(patterns[m], section_len) * reps != step_counts[m]) {
+            for (int j = 0; j < n_motors; j++) free(patterns[j]);
+            return 0;
+        }
+    }
+
+    *section_len_out = section_len;
+    *reps_out        = reps;
+    return 1;
+}
+
+int showTickPatternScreen(int *step_counts, int n_motors) {
+    static const char *names[] = {"Base", "Shoulder", "Elbow", "End Effector"};
+    int *patterns[MAX_MOTORS];
+    int section_len, reps;
+
+    if (!buildPatterns(step_counts, n_motors, patterns, &section_len, &reps)) {
+        printf("    %sPattern generation failed.%s\n", RED, RESET);
+        return 0;
+    }
+
+    if (section_len == 0) return 1;
+
+    clearScreen();
+    printf("%sTICK PATTERN%s\n", BLUE, RESET);
+    printf("    Section: %d ticks  x  %d repetitions\n\n", section_len, reps);
+
+    int rows = (section_len + DISPLAY_LINE_WIDTH - 1) / DISPLAY_LINE_WIDTH;
+
+    for (int row = 0; row < rows; row++) {
+        int tick_start = row * DISPLAY_LINE_WIDTH;
+        int tick_end   = tick_start + DISPLAY_LINE_WIDTH;
+        if (tick_end > section_len) tick_end = section_len;
+
+        int prefix_len = 24;
+        printf("%*s", prefix_len, "");
+        for (int t = tick_start; t < tick_end; t++) {
+            int col = t + 1;
+            if      (col % 10 == 0) printf("\x1b[33m%d\x1b[0m", col % 100 / 10);
+            else if (col % 5  == 0) printf("\x1b[33m+\x1b[0m");
+            else                    printf(".");
+        }
+        printf("\n");
+
+        printf("%*s", prefix_len, "");
+        for (int t = tick_start; t < tick_end; t++) {
+            int col = t + 1;
+            if (col % 10 == 0) printf("\x1b[33m%d\x1b[0m", col % 10);
+            else                printf(" ");
+        }
+        printf("\n");
+
+        for (int m = 0; m < n_motors; m++) {
+            printf("    Motor %d  %-13s ", m + 1, names[m]);
+            for (int t = tick_start; t < tick_end; t++) {
+                if (patterns[m][t])
+                    printf(GREEN "\xe2\x96\x88" RESET);
+                else
+                    printf(RED   "\xe2\x96\x88" RESET);
+            }
+            printf("  %d steps\n", step_counts[m]);
+        }
+        if (row < rows - 1) printf("\n");
+    }
+
+    printf("\n    %s1)%s Execute   %s2)%s Cancel\n    ", RED, RESET, RED, RESET);
+
+    for (int m = 0; m < n_motors; m++) free(patterns[m]);
+
+    int conf;
+    scanf("%d", &conf);
+    return conf == 1;
+}
+
+void driveMotorsSimultaneous(int *step_counts, int *dirs, int n_motors,
+                             int *step_pins, int *dir_pins) {
+    static const char *names[] = {"Base", "Shoulder", "Elbow", "End Effector"};
+    int *patterns[MAX_MOTORS];
+    int section_len, reps;
+
+    if (!buildPatterns(step_counts, n_motors, patterns, &section_len, &reps)) {
+        printf("    %sPattern generation failed. Aborting.%s\n", RED, RESET);
+        return;
+    }
+
+    if (section_len == 0) {
+        printf("    %sNo movement required.%s\n", YELLOW, RESET);
+        return;
+    }
+
+    char log_buf[256];
+    int  pos = 0;
+    pos += snprintf(log_buf + pos, sizeof(log_buf) - pos, "DRIVE: Simultaneous |");
+    for (int m = 0; m < n_motors; m++)
+        pos += snprintf(log_buf + pos, sizeof(log_buf) - pos,
+                        " M%d %s %dsteps |", m + 1, dirs[m] ? "CW" : "CCW", step_counts[m]);
+    log_activity("%s", log_buf);
+
+    for (int m = 0; m < n_motors; m++)
+        gpio_write(dir_pins[m], dirs[m]);
+    usleep(STEP_DELAY_US);
+
+    for (int rep = 0; rep < reps; rep++) {
+        for (int tick = 0; tick < section_len; tick++) {
+            for (int m = 0; m < n_motors; m++)
+                if (patterns[m][tick]) gpio_write(step_pins[m], 1);
+            usleep(STEP_DELAY_US);
+            for (int m = 0; m < n_motors; m++)
+                if (patterns[m][tick]) gpio_write(step_pins[m], 0);
+            usleep(STEP_DELAY_US);
+        }
+    }
+
+    pos = 0;
+    pos += snprintf(log_buf + pos, sizeof(log_buf) - pos, "DONE: Simultaneous |");
+    for (int m = 0; m < n_motors; m++)
+        pos += snprintf(log_buf + pos, sizeof(log_buf) - pos,
+                        " M%d(%s) %dsteps |", m + 1, names[m], step_counts[m]);
+    log_activity("%s", log_buf);
+
+    for (int m = 0; m < n_motors; m++) free(patterns[m]);
 }
 
 void passAnglesToDriver(void) {
+    int step_counts[3], dirs[3], step_pins[3], dir_pins[3];
+    for (int m = 0; m < 3; m++) {
+        dirs[m]        = (angles[m] >= 0) ? 1 : 0;
+        step_counts[m] = (int)((double)abs(angles[m]) * STEPS_PER_REV / 360.0);
+        step_pins[m]   = motorPins[m][0];
+        dir_pins[m]    = motorPins[m][1];
+    }
+
     clearScreen();
     printf("%sDRIVER PASSING%s\n", BLUE, RESET);
     printf("    Initializing GPIO pins...\n");
     gpio_init();
 
-    printf("    Driving motors to target position...\n\n");
-
-    printf("    %sMotor 1 (Base):%s      %d deg\n", GREEN, RESET, angles[0]);
-    step_motor(0, motorPins[0][0], motorPins[0][1], angles[0]);
-
-    printf("    %sMotor 2 (Shoulder):%s  %d motor-deg (%d deg x16)\n",
-           GREEN, RESET, angles[1], angles[1] / 16);
-    step_motor(1, motorPins[1][0], motorPins[1][1], angles[1]);
-
-    printf("    %sMotor 3 (Elbow):%s     %d motor-deg (%d deg x16)\n",
-           GREEN, RESET, angles[2], angles[2] / 16);
-    step_motor(2, motorPins[2][0], motorPins[2][1], angles[2]);
+    printf("    Driving motors simultaneously...\n");
+    driveMotorsSimultaneous(step_counts, dirs, 3, step_pins, dir_pins);
 
     gpio_cleanup();
 
@@ -219,22 +377,17 @@ void InverseKinematicsCalculations(void) {
     printf("    Elbow:      %d deg\n\n", angles[2]);
     printf("    %sJoint angles are within limits.%s\n", GREEN, RESET);
     printf("    %sArm can reach the target!%s\n",       GREEN, RESET);
-    printf("    %sPress any key to continue...%s\n",    YELLOW, RESET);
+    printf("    %sPress any key to see tick pattern...%s\n", YELLOW, RESET);
     getchar(); getchar();
 
-    clearScreen();
-    printf("%sINVERSE KINEMATICS CALCULATIONS%s\n    Joint angles calculated successfully!\n", BLUE, RESET);
-    printf("    Do you want to pass on the angles to the Driver?\n");
-    printf("    %s1)%s Yes, pass angles to Driver\n    %s2)%s No, return to Main Menu\n    ",
-           RED, RESET, RED, RESET);
-    scanf("%d", &choice);
-    if (choice == 1) {
-        printf("    Passing angles to Driver...\n");
+    int step_counts[3];
+    for (int m = 0; m < 3; m++)
+        step_counts[m] = (int)((double)abs(angles[m]) * STEPS_PER_REV / 360.0);
+
+    if (showTickPatternScreen(step_counts, 3))
         passAnglesToDriver();
-    } else {
-        printf("    Returning to Main Menu...\n");
+    else
         menuStructure();
-    }
 }
 
 void getTargetCoords(void) {
