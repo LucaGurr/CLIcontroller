@@ -46,6 +46,7 @@ static const int motorPins[4][2] = {
 
 void menuStructure(void);
 void getTargetCoords(void);
+void getCoords(void);
 
 int choice;
 int lengths      [2] = {500, 525};
@@ -55,6 +56,12 @@ int angles       [4] = {0};
 
 static void clearScreen(void) {
     printf("\x1b[3J\x1b[H\x1b[2J");
+    fflush(stdout);
+}
+
+static void clearInputBuffer(void) {
+    int c;
+    while ((c = getchar()) != '\n' && c != EOF);
 }
 
 void log_activity(const char *fmt, ...) {
@@ -197,6 +204,37 @@ static int buildPatterns(int *step_counts, int n_motors,
     return 1;
 }
 
+static void printRuler(int tick_start, int tick_end, int prefix_len) {
+    int show_hundreds = (tick_end > 99);
+
+    if (show_hundreds) {
+        printf("%*s", prefix_len, "");
+        for (int t = tick_start; t < tick_end; t++) {
+            int col = t + 1;
+            if (col % 100 == 0) printf(YELLOW "%d" RESET, (col / 100) % 10);
+            else                 printf(" ");
+        }
+        printf("\n");
+    }
+
+    printf("%*s", prefix_len, "");
+    for (int t = tick_start; t < tick_end; t++) {
+        int col = t + 1;
+        if      (col % 10 == 0) printf(YELLOW "%d" RESET, (col / 10) % 10);
+        else if (col % 5  == 0) printf(YELLOW "+" RESET);
+        else                    printf(".");
+    }
+    printf("\n");
+
+    printf("%*s", prefix_len, "");
+    for (int t = tick_start; t < tick_end; t++) {
+        int col = t + 1;
+        if (col % 10 == 0) printf(YELLOW "%d" RESET, col % 10);
+        else                printf(" ");
+    }
+    printf("\n");
+}
+
 int showTickPatternScreen(int *step_counts, int n_motors) {
     static const char *names[] = {"Base", "Shoulder", "Elbow", "End Effector"};
     int *patterns[MAX_MOTORS];
@@ -207,36 +245,28 @@ int showTickPatternScreen(int *step_counts, int n_motors) {
         return 0;
     }
 
-    if (section_len == 0) return 1;
-
     clearScreen();
     printf("%sTICK PATTERN%s\n", BLUE, RESET);
+
+    if (section_len == 0) {
+        printf("    %sAll motors at 0 steps — no movement.%s\n\n", YELLOW, RESET);
+        printf("    %s1)%s Execute anyway   %s2)%s Cancel\n    ", RED, RESET, RED, RESET);
+        int conf;
+        scanf("%d", &conf);
+        return conf == 1;
+    }
+
     printf("    Section: %d ticks  x  %d repetitions\n\n", section_len, reps);
 
-    int rows = (section_len + DISPLAY_LINE_WIDTH - 1) / DISPLAY_LINE_WIDTH;
+    int rows       = (section_len + DISPLAY_LINE_WIDTH - 1) / DISPLAY_LINE_WIDTH;
+    int prefix_len = 24;
 
     for (int row = 0; row < rows; row++) {
         int tick_start = row * DISPLAY_LINE_WIDTH;
         int tick_end   = tick_start + DISPLAY_LINE_WIDTH;
         if (tick_end > section_len) tick_end = section_len;
 
-        int prefix_len = 24;
-        printf("%*s", prefix_len, "");
-        for (int t = tick_start; t < tick_end; t++) {
-            int col = t + 1;
-            if      (col % 10 == 0) printf("\x1b[33m%d\x1b[0m", col % 100 / 10);
-            else if (col % 5  == 0) printf("\x1b[33m+\x1b[0m");
-            else                    printf(".");
-        }
-        printf("\n");
-
-        printf("%*s", prefix_len, "");
-        for (int t = tick_start; t < tick_end; t++) {
-            int col = t + 1;
-            if (col % 10 == 0) printf("\x1b[33m%d\x1b[0m", col % 10);
-            else                printf(" ");
-        }
-        printf("\n");
+        printRuler(tick_start, tick_end, prefix_len);
 
         for (int m = 0; m < n_motors; m++) {
             printf("    Motor %d  %-13s ", m + 1, names[m]);
@@ -253,10 +283,10 @@ int showTickPatternScreen(int *step_counts, int n_motors) {
 
     printf("\n    %s1)%s Execute   %s2)%s Cancel\n    ", RED, RESET, RED, RESET);
 
-    for (int m = 0; m < n_motors; m++) free(patterns[m]);
-
     int conf;
     scanf("%d", &conf);
+
+    for (int m = 0; m < n_motors; m++) free(patterns[m]);
     return conf == 1;
 }
 
@@ -330,7 +360,8 @@ void passAnglesToDriver(void) {
 
     printf("\n    %sAll motors driven to target!%s\n", GREEN, RESET);
     printf("    %sPress any key to return to Main Menu...%s\n", YELLOW, RESET);
-    getchar(); getchar();
+    clearInputBuffer();
+    getchar();
     menuStructure();
 }
 
@@ -353,7 +384,8 @@ void InverseKinematicsCalculations(void) {
         printf("%sERROR:%s Target (%.0f, %.0f) out of reach!\n", RED, RESET, x, z);
         printf("    Max reach: %.0f mm, Target distance: %.2f mm\n", L1 + L2, dist);
         printf("    Press any key to return...");
-        getchar(); getchar();
+        clearInputBuffer();
+        getchar();
         getTargetCoords();
         return;
     }
@@ -378,7 +410,8 @@ void InverseKinematicsCalculations(void) {
     printf("    %sJoint angles are within limits.%s\n", GREEN, RESET);
     printf("    %sArm can reach the target!%s\n",       GREEN, RESET);
     printf("    %sPress any key to see tick pattern...%s\n", YELLOW, RESET);
-    getchar(); getchar();
+    clearInputBuffer();
+    getchar();
 
     int step_counts[3];
     for (int m = 0; m < 3; m++)
@@ -397,7 +430,9 @@ void getTargetCoords(void) {
     printf("    x,z = mm, y = degrees base rotation\n    Input format: x, y, z\n    ");
 
     if (scanf("%d, %d, %d", &targetcoords[0], &targetcoords[1], &targetcoords[2]) != 3) {
-        printf("Invalid input format.\n");
+        clearInputBuffer();
+        printf("    %sInvalid input format. Try again.%s\n", RED, RESET);
+        getTargetCoords();
         return;
     }
 
@@ -410,6 +445,7 @@ void getTargetCoords(void) {
     scanf("%d", &choice);
     if (choice == 1) InverseKinematicsCalculations();
     else if (choice == 2) getTargetCoords();
+    else getTargetCoords();
 }
 
 void getCoords(void) {
@@ -419,7 +455,9 @@ void getCoords(void) {
     printf("    x,z = mm, y = degrees base rotation\n    Input format: x, y, z\n    ");
 
     if (scanf("%d, %d, %d", &initcoords[0], &initcoords[1], &initcoords[2]) != 3) {
-        printf("Invalid input format.\n");
+        clearInputBuffer();
+        printf("    %sInvalid input format. Try again.%s\n", RED, RESET);
+        getCoords();
         return;
     }
 
@@ -432,6 +470,7 @@ void getCoords(void) {
     scanf("%d", &choice);
     if (choice == 1) getTargetCoords();
     else if (choice == 2) getCoords();
+    else getCoords();
 }
 
 void customSecLenMenu(void) {
@@ -439,9 +478,9 @@ void customSecLenMenu(void) {
     int tempL1, tempL2;
     printf("%sCUSTOM SECTION LENGTH MENU%s\n", BLUE, RESET);
     printf("    Lower Section (L1) in mm: ");
-    scanf("%d", &tempL1);
+    if (scanf("%d", &tempL1) != 1) { clearInputBuffer(); customSecLenMenu(); return; }
     printf("    Upper Section (L2) in mm: ");
-    scanf("%d", &tempL2);
+    if (scanf("%d", &tempL2) != 1) { clearInputBuffer(); customSecLenMenu(); return; }
     lengths[0] = tempL1;
     lengths[1] = tempL2;
     getCoords();
@@ -453,9 +492,10 @@ void inverseKinematicsMenu(void) {
     printf("    %s1)%s Use default lengths (500/525)\n", RED, RESET);
     printf("    %s2)%s Use custom lengths\n    ",         RED, RESET);
 
-    scanf("%d", &choice);
+    if (scanf("%d", &choice) != 1) { clearInputBuffer(); inverseKinematicsMenu(); return; }
     if (choice == 1) getCoords();
     else if (choice == 2) customSecLenMenu();
+    else inverseKinematicsMenu();
 }
 
 void menuStructure(void) {
