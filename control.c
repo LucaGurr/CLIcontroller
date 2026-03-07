@@ -1,5 +1,8 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <math.h>
+#include <unistd.h>
+#include <stdarg.h>
 
 #define BLUE "\x1b[34m"
 #define RED "\x1b[31m"
@@ -7,6 +10,28 @@
 #define YELLOW "\x1b[33m"
 #define RESET "\x1b[0m"
 #define PI 3.14159265358979323846
+
+// GPIO Pin Definitions (A4988 Stepper Drivers -> Raspberry Pi GPIO)
+#define MOTOR1_STEP_PIN 17   // A4988 #1 STEP -> Base
+#define MOTOR1_DIR_PIN  27   // A4988 #1 DIR  -> Base
+#define MOTOR2_STEP_PIN 22   // A4988 #2 STEP -> Shoulder
+#define MOTOR2_DIR_PIN  23   // A4988 #2 DIR  -> Shoulder
+#define MOTOR3_STEP_PIN 24   // A4988 #3 STEP -> Elbow
+#define MOTOR3_DIR_PIN  25   // A4988 #3 DIR  -> Elbow
+#define MOTOR4_STEP_PIN  5   // A4988 #4 STEP -> End Effector
+#define MOTOR4_DIR_PIN   6   // A4988 #4 DIR  -> End Effector
+
+#define GPIO_BASE_PATH "/gpio"
+#define STEPS_PER_REV 200       // 1.8 deg per full step
+#define STEP_DELAY_US 1500      // microseconds between step transitions
+
+static const int ALL_PINS[] = {
+    MOTOR1_STEP_PIN, MOTOR1_DIR_PIN,
+    MOTOR2_STEP_PIN, MOTOR2_DIR_PIN,
+    MOTOR3_STEP_PIN, MOTOR3_DIR_PIN,
+    MOTOR4_STEP_PIN, MOTOR4_DIR_PIN
+};
+#define NUM_PINS 8
 
 void menuStructure();
 void getTargetCoords();
@@ -16,20 +41,123 @@ int choice;
 int lengths         [2] = {500, 525};
 int initcoords      [3] = {0};
 int targetcoords    [3] = {0};
-int motors          [4] = {0}; // replacement for bool 0 = false/nC 1 = true/iC
-int angles          [4] = {0}; // [0]: Base, [1]: Shoulder, [2]: Elbow ,[3]: End effector
-int motorPins       [4][2] = {{0, 0}, {0, 0}, {0, 0}, {0, 0}};
+int motors          [4] = {0};
+int angles          [4] = {0};
+int motorPins       [4][2] = {
+    {MOTOR1_STEP_PIN, MOTOR1_DIR_PIN},
+    {MOTOR2_STEP_PIN, MOTOR2_DIR_PIN},
+    {MOTOR3_STEP_PIN, MOTOR3_DIR_PIN},
+    {MOTOR4_STEP_PIN, MOTOR4_DIR_PIN}
+};
 
 
 void clearScreen(){
     printf("\x1b[3J\x1b[H\x1b[2J");
 }
 
+// --- GPIO sysfs interface (simulated via shared volume) ---
+
+void log_activity(const char *fmt, ...) {
+    FILE *f = fopen(GPIO_BASE_PATH "/activity.log", "a");
+    if (!f) return;
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(f, fmt, args);
+    va_end(args);
+    fprintf(f, "\n");
+    fclose(f);
+}
+
+void gpio_export(int pin) {
+    char path[64];
+    snprintf(path, sizeof(path), GPIO_BASE_PATH "/gpio%d", pin);
+    if (access(path, F_OK) == 0) return;
+    FILE *f = fopen(GPIO_BASE_PATH "/export", "w");
+    if (f) { fprintf(f, "%d", pin); fclose(f); }
+}
+
+void gpio_set_direction(int pin, const char *dir) {
+    char path[64];
+    snprintf(path, sizeof(path), GPIO_BASE_PATH "/gpio%d/direction", pin);
+    FILE *f = fopen(path, "w");
+    if (f) { fprintf(f, "%s", dir); fclose(f); }
+}
+
+void gpio_write(int pin, int value) {
+    char path[64];
+    snprintf(path, sizeof(path), GPIO_BASE_PATH "/gpio%d/value", pin);
+    FILE *f = fopen(path, "w");
+    if (f) { fprintf(f, "%d", value); fclose(f); }
+}
+
+void gpio_init() {
+    log_activity("INIT: Exporting and configuring %d GPIO pins", NUM_PINS);
+    for (int i = 0; i < NUM_PINS; i++) {
+        gpio_export(ALL_PINS[i]);
+        gpio_set_direction(ALL_PINS[i], "out");
+        gpio_write(ALL_PINS[i], 0);
+    }
+    log_activity("INIT: All pins configured as OUTPUT, set LOW");
+}
+
+void gpio_cleanup() {
+    for (int i = 0; i < NUM_PINS; i++) {
+        gpio_write(ALL_PINS[i], 0);
+    }
+    log_activity("CLEANUP: All pins reset to LOW");
+}
+
+void step_motor(int motor_id, int step_pin, int dir_pin, int angle_deg) {
+    const char *names[] = {"Base", "Shoulder", "Elbow", "End Effector"};
+    int direction = (angle_deg >= 0) ? 1 : 0;
+    int abs_angle = abs(angle_deg);
+    int steps = (int)((double)abs_angle * STEPS_PER_REV / 360.0);
+
+    log_activity("DRIVE: Motor %d (%s) | DIR=%s | Steps=%d | Angle=%ddeg",
+                 motor_id + 1, names[motor_id],
+                 direction ? "CW" : "CCW", steps, angle_deg);
+
+    printf("      GPIO %d DIR=%s, GPIO %d pulsing %d steps...\n",
+           dir_pin, direction ? "CW" : "CCW", step_pin, steps);
+
+    gpio_write(dir_pin, direction);
+    usleep(STEP_DELAY_US);
+
+    for (int i = 0; i < steps; i++) {
+        gpio_write(step_pin, 1);
+        usleep(STEP_DELAY_US);
+        gpio_write(step_pin, 0);
+        usleep(STEP_DELAY_US);
+    }
+
+    log_activity("DONE: Motor %d (%s) | %d steps complete",
+                 motor_id + 1, names[motor_id], steps);
+}
+
+// --- end GPIO ---
+
 void passAnglesToDriver() {
     clearScreen();
     printf("%sDRIVER PASSING%s\n", BLUE, RESET);
-    printf("    (Simulated) Passing angles to Driver...\n");
-    printf("    Base: %d deg, Shoulder: %d deg, Elbow: %d deg\n", angles[0], angles[1], angles[2]);
+    printf("    Initializing GPIO pins...\n");
+    gpio_init();
+
+    printf("    Driving motors to target position...\n\n");
+
+    printf("    %sMotor 1 (Base):%s      %d deg\n", GREEN, RESET, angles[0]);
+    step_motor(0, MOTOR1_STEP_PIN, MOTOR1_DIR_PIN, angles[0]);
+
+    printf("    %sMotor 2 (Shoulder):%s  %d motor-deg (%d deg x16)\n",
+           GREEN, RESET, angles[1], angles[1] / 16);
+    step_motor(1, MOTOR2_STEP_PIN, MOTOR2_DIR_PIN, angles[1]);
+
+    printf("    %sMotor 3 (Elbow):%s     %d motor-deg (%d deg x16)\n",
+           GREEN, RESET, angles[2], angles[2] / 16);
+    step_motor(2, MOTOR3_STEP_PIN, MOTOR3_DIR_PIN, angles[2]);
+
+    gpio_cleanup();
+
+    printf("\n    %sAll motors driven to target!%s\n", GREEN, RESET);
     printf("    %sPress any key to return to Main Menu...%s\n", YELLOW, RESET);
     getchar(); getchar();
     menuStructure();
