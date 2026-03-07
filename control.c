@@ -23,7 +23,7 @@
 
 #define GPIO_BASE_PATH "/gpio"
 #define STEPS_PER_REV 200       // 1.8 deg per full step
-#define STEP_DELAY_US 1500      // microseconds between step transitions
+#define STEP_DELAY_US 15000      // microseconds between step transitions
 
 static const int ALL_PINS[] = {
     MOTOR1_STEP_PIN, MOTOR1_DIR_PIN,
