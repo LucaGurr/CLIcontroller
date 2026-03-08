@@ -20,6 +20,7 @@
 #define MOTOR3_DIR_PIN   25
 #define MOTOR4_STEP_PIN   5
 #define MOTOR4_DIR_PIN    6
+#define ENABLE           12
 
 #ifndef GPIO_BASE_PATH
 #define GPIO_BASE_PATH "/sys/class/gpio"
