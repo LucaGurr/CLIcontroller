@@ -175,6 +175,74 @@ for each repetition:
 
 This is implemented in `driveMotorsSimultaneous()`, called from `passAnglesToDriver()`. The function takes arrays of step counts, directions, step pins, and dir pins, so it is not hardcoded to a specific number of motors.
 
+## Self-test
+
+The main menu offers **[3] Self-test**, which runs a battery of regression tests on the inverse kinematics and tick-pattern logic without driving any hardware. All tests use known-good inputs and expected outputs; the suite is designed so that any change to the IK formula, angle-to-step conversion, or Bresenham pattern generation will cause one or more tests to fail, making it safe to refactor or port the code.
+
+### Why these tests exist
+
+- **Correctness:** The IK solution and step patterns are derived from closed-form math and integer arithmetic. A single sign error, wrong constant, or off-by-one in the GCD/Bresenham path would produce wrong angles or wrong step totals. The selftest locks in the current, verified behavior.
+- **Edge cases:** The formulas have natural boundaries (reachability, `acos` domain, `atan2(0,0)`, division by GCD, all-zero steps). Those boundaries are where bugs typically appear (e.g. out-of-range, undefined behavior, or wrong rejection). The tests explicitly hit those boundaries so regressions are caught immediately.
+- **Determinism:** Expected values were obtained by running the same formulas (by hand or from the code) once and recording the results. The test then compares the running code’s output to those values. A small tolerance (±20 motor degrees) is allowed only where integer truncation in the IK can change the last digit; all other tests require an exact match.
+
+### How the edge cases were chosen
+
+- **Reachability:** The condition `|L1 − L2| ≤ dist ≤ L1 + L2` defines an annulus. We test:
+  - **Inside:** Points clearly inside (e.g. full stretch, 90° elbow, min reach folded, horizontal 725 mm, base angle 90°) to ensure the solver returns consistent angles.
+  - **Outside:** Points just outside (too far, origin, just beyond max, just inside min) to ensure the solver correctly reports “out of reach” and does not return angles.
+  - **Boundary:** Full stretch and min reach sit on the boundary (`dist = L1 + L2` and `dist = |L1 − L2|`); these stress `acos` clamping and the exact comparison.
+- **Quadrants and geometry:** We test positive and negative x (full stretch +x / −x), positive and negative z (straight up, straight down), and mixed x/z (e.g. 500,525 and 725,0) so that all quadrants and the `atan2(z, x)` behavior are exercised.
+- **Degenerate geometry:** When L1 = L2, the inner radius is zero; the “origin” target (0,0) lies on that circle. The triangle degenerates (both `atan2` terms can be `atan2(0,0)`, which is implementation-defined in C). We test both “equal segments full stretch” and “equal segments origin (folded)” so that L1 = L2 and the (0,0) case are covered; the expected shoulder angle for (0,0) is taken from the actual implementation (e.g. −1440 motor degrees) because the standard does not fix `atan2(0,0)`.
+- **Tick patterns:** The Bresenham path is sensitive to:
+  - **All zeros:** `max_steps == 0`; no allocation, no division by GCD. Ensures we don’t dereference or free uninitialized pointers.
+  - **Single motor:** Only one motor has steps; others are zero. GCD and section length must still be correct.
+  - **Equal steps:** All motors the same; section length 1, reps = that step count. Catches GCD and “one tick per rep” behavior.
+  - **Coprime steps:** e.g. (7, 11, 13); GCD = 1, section length = max_steps. Stress-tests the Bresenham distribution over a long section.
+  - **Common GCD:** e.g. (16, 32, 48), (64, 128, 192), (3, 6, 9). Ensures `section_len = max_steps / g` and `reps = g` are correct and that per-section step counts multiply back to the requested totals.
+  - **Minimal and single-step:** (1,1,1) and (1,0,0), (0,0,1), etc. Ensure small counts and “only one motor steps” don’t break the algorithm.
+  - **Large counts:** e.g. (1000, 500, 250). Ensures no overflow or obvious scaling errors.
+- **End-to-end consistency:** One test converts fixed IK-style angles to steps, runs `buildPatterns`, and checks that for each motor the sum of steps in the pattern × repetitions equals the requested step count. That ties IK → steps → pattern together.
+
+### Inverse kinematics test cases (L1 = 500 mm, L2 = 525 mm unless noted)
+
+| Test | Target (x, base, z) | Why it’s an edge case | Expected (base, shoulder_motor, elbow_motor) |
+|------|--------------------|------------------------|---------------------------------------------|
+| Full stretch +x | (1025, 0, 0) | Boundary: dist = L1 + L2; cos(q2) = 1, q2 = 0; arm straight. | (0, 0, 0) |
+| Full stretch −x | (−1025, 0, 0) | Same boundary, negative x; exercises atan2(z,x) in second quadrant. | (0, 2880, 0) |
+| Straight up (z only) | (0, 0, 1025) | Boundary, z-only; atan2(1025, 0) = π/2. | (0, 1440, 0) |
+| Straight down | (0, 0, −1025) | Boundary, negative z; atan2(−1025, 0) = −π/2. | (0, −1440, 0) |
+| 90° elbow at (500, 525) | (500, 0, 525) | dist² = L1² + L2² ⇒ cos(q2) = 0, q2 = 90°; nice closed form. | (0, 0, 1440) |
+| Min reach folded (25, 0) | (25, 0, 0) | Boundary: dist = L1 − L2; cos(q2) = −1, q2 = 180°; arm fully folded. Shoulder can truncate to −179° → tolerance. | (0, −2880, 2880) ± tolerance |
+| Base angle 90° | (1025, 90, 0) | Base is passed through; ensures base is not mixed into planar IK. | (90, 0, 0) |
+| Horizontal 725 mm | (725, 0, 0) | Elbow 90°, shoulder not zero; mixed geometry. | (0, −736, 1440) |
+| Out of reach (too far) | (1500, 0, 0) | dist > L1 + L2 ⇒ must reject. | reject |
+| Out of reach (origin) | (0, 0, 0) with L1≠L2 | dist = 0 < \|L1−L2\| ⇒ must reject. | reject |
+| Out of reach (just beyond max) | (1026, 0, 0) | dist = 1026 > 1025 ⇒ reject. | reject |
+| Out of reach (just inside min) | (24, 0, 0) | dist = 24 < 25 ⇒ reject. | reject |
+| Equal segments L1=L2=400 full stretch | (800, 0, 0) | L1 = L2; inner radius 0; boundary dist = 2L. | (0, 0, 0) |
+| Equal segments origin (folded, L1=L2) | (0, 0, 0) with L1=L2=400 | dist = 0 = \|L1−L2\|; degenerate atan2(0,0). Expected angle from implementation. | (0, −1440, 2880) |
+| L1 > L2 full stretch | (1025, 0, 0), L1=525, L2=500 | Formula is symmetric in L1/L2; ensures no hidden L1&lt;L2 assumption. | (0, 0, 0) |
+
+### Tick-pattern test cases
+
+| Test | Step counts | Why it’s an edge case |
+|------|-------------|----------------------|
+| All zeros | (0, 0, 0) | max_steps = 0; no allocation; must not free uninitialized pointers. |
+| Single motor | (100,0,0), (0,100,0), (0,0,100) | Only one motor steps; GCD and section_len must still be correct for that motor. |
+| Equal | (100,100,100), (200,200,200), (17,17,17) | section_len = 1, reps = step count; every tick steps all motors. |
+| Coprime | (7, 11, 13) | GCD = 1 ⇒ section_len = 13, reps = 1; long section, no repetition. |
+| GCD &gt; 1 | (16,32,48), (64,128,192), (3,6,9) | section_len = max/g, reps = g; verifies integer division and step totals. |
+| Minimal | (1,1,1), (1,0,0), (0,0,1) | Smallest non-zero counts; single-step on one motor. |
+| Large | (1000, 500, 250) | Larger numbers; no overflow, correct scaling. |
+
+### IK → steps → pattern consistency
+
+One test takes fixed motor angles (e.g. base 0°, shoulder 90° motor, elbow 45° motor), converts to steps, runs `buildPatterns`, and asserts that for each motor the sum of pattern entries × repetitions equals the requested step count. This ensures the full pipeline (angles → steps → Bresenham → execution totals) is consistent.
+
+### Running the self-test
+
+From the main menu, choose **[3] Self-test**. The program prints each test name and **[PASS]** or **[FAIL]** with details on failure, then a summary (e.g. “All 31 tests passed” or “2 failed, 29 passed”). Press any key to return to the main menu. No GPIO is touched.
+
 ## Build & Run
 
 ### Native (no GPIO simulation)
@@ -311,8 +379,8 @@ The program is a menu-driven TUI using ANSI escape codes for color and screen cl
 
 ```
 main
- └── menuStructure                   (Main Menu: IK mode or exit)
-      └── inverseKinematicsMenu      (choose default or custom arm lengths)
+ └── menuStructure                   (Main Menu: IK, Raw, Self-test, Exit)
+      ├── inverseKinematicsMenu      (choose default or custom arm lengths)
            ├── getCoords              (enter initial coordinates x, y, z)
            │    └── getTargetCoords   (enter target coordinates x, y, z)
            │         └── InverseKinematicsCalculations
@@ -323,6 +391,8 @@ main
            │                   ├── gpio_cleanup()     (all pins LOW)
            │                   └── menuStructure       (back to main menu)
            └── customSecLenMenu      (enter L1, L2 in mm → getCoords)
+      ├── rawMovementMenu             (raw steps or angles → tick pattern → driver)
+      └── run_selftest                (IK + tick-pattern regression tests; no GPIO)
 ```
 
 Menus navigate by recursive calls. Invalid or out-of-range input returns the user to the appropriate previous menu.

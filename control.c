@@ -53,6 +53,7 @@ void getTargetCoords(void);
 void getCoords(void);
 void getRawMotorData(void);
 void getRawAngles(void);
+void run_selftest(void);
 
 int choice;
 int lengths      [2] = {500, 525};
@@ -484,19 +485,37 @@ void passRawToDriver(int mode) {
 }
 
 
+/* Core IK: returns 0 if out of reach, 1 on success. Fills angles_out[3]: base, shoulder_motor_deg, elbow_motor_deg. */
+static int compute_ik(double L1, double L2, double x, double base_angle, double z, int angles_out[3]) {
+    double dist = sqrt(x * x + z * z);
+    if (dist > (L1 + L2) || dist < fabs(L1 - L2))
+        return 0;
+
+    double cosQ2 = (dist * dist - L1 * L1 - L2 * L2) / (2.0 * L1 * L2);
+    if (cosQ2 >  1.0) cosQ2 =  1.0;
+    if (cosQ2 < -1.0) cosQ2 = -1.0;
+
+    double q2 = acos(cosQ2);
+    double q1 = atan2(z, x) - atan2(L2 * sin(q2), L1 + L2 * cos(q2));
+
+    angles_out[0] = (int)base_angle;
+    angles_out[1] = ((int)(q1 * 180.0 / PI)) * GEARBOX_RATIO;
+    angles_out[2] = ((int)(q2 * 180.0 / PI)) * GEARBOX_RATIO;
+    return 1;
+}
+
 void InverseKinematicsCalculations(void) {
     clearScreen();
     printHeader("CALCULATING");
     printf("  Computing joint angles...\n\n");
 
-    double L1        = (double)lengths[0];
-    double L2        = (double)lengths[1];
-    double x         = (double)targetcoords[0];
-    double baseAngle = (double)targetcoords[1];
-    double z         = (double)targetcoords[2];
-    double dist      = sqrt(x * x + z * z);
+    double L1   = (double)lengths[0];
+    double L2   = (double)lengths[1];
+    double x    = (double)targetcoords[0];
+    double z    = (double)targetcoords[2];
+    double dist = sqrt(x * x + z * z);
 
-    if (dist > (L1 + L2) || dist < fabs(L1 - L2)) {
+    if (!compute_ik(L1, L2, x, (double)targetcoords[1], z, angles)) {
         clearScreen();
         printHeader("OUT OF REACH");
         printErr("Target coordinates are out of reach.");
@@ -508,17 +527,6 @@ void InverseKinematicsCalculations(void) {
         getTargetCoords();
         return;
     }
-
-    double cosQ2 = (dist * dist - L1 * L1 - L2 * L2) / (2.0 * L1 * L2);
-    if (cosQ2 >  1.0) cosQ2 =  1.0;
-    if (cosQ2 < -1.0) cosQ2 = -1.0;
-
-    double q2 = acos(cosQ2);
-    double q1 = atan2(z, x) - atan2(L2 * sin(q2), L1 + L2 * cos(q2));
-
-    angles[0] = (int)baseAngle;
-    angles[1] = ((int)(q1 * 180.0 / PI)) * GEARBOX_RATIO;
-    angles[2] = ((int)(q2 * 180.0 / PI)) * GEARBOX_RATIO;
 
     clearScreen();
     printHeader("IK RESULTS");
@@ -778,18 +786,211 @@ void rawMovementMenu(void) {
     else                  rawMovementMenu();
 }
 
+/* ----- Selftest: IK and tick patterns ----- */
+#define SELFTEST_IK_TOLERANCE 20  /* allow ±20 motor deg (~1 joint deg) from rounding */
+
+static int selftest_ik_one(double L1, double L2, int x, int base_angle, int z,
+                           int expect_reach, int exp_base, int exp_shoulder, int exp_elbow,
+                           const char *label, int *passed, int *failed) {
+    int got[3];
+    int reach = compute_ik(L1, L2, (double)x, (double)base_angle, (double)z, got);
+    if (expect_reach && !reach) {
+        printf("  " RED "[FAIL]" RESET "  %s  (expected reachable, got out of reach)\n", label);
+        (*failed)++;
+        return 0;
+    }
+    if (!expect_reach && reach) {
+        printf("  " RED "[FAIL]" RESET "  %s  (expected out of reach, got angles)\n", label);
+        (*failed)++;
+        return 0;
+    }
+    if (!expect_reach && !reach) {
+        printf("  " GREEN "[PASS]" RESET "  %s\n", label);
+        (*passed)++;
+        return 1;
+    }
+    int ok = (got[0] == exp_base)
+          && (abs(got[1] - exp_shoulder) <= SELFTEST_IK_TOLERANCE)
+          && (abs(got[2] - exp_elbow) <= SELFTEST_IK_TOLERANCE);
+    if (!ok) {
+        printf("  " RED "[FAIL]" RESET "  %s  got [%d,%d,%d] expected [%d,%d,%d]\n",
+               label, got[0], got[1], got[2], exp_base, exp_shoulder, exp_elbow);
+        (*failed)++;
+        return 0;
+    }
+    printf("  " GREEN "[PASS]" RESET "  %s\n", label);
+    (*passed)++;
+    return 1;
+}
+
+static int selftest_tick_one(int *steps, int n_motors, const char *label,
+                             int *passed, int *failed) {
+    int *patterns[MAX_MOTORS];
+    int section_len, reps;
+    int ok = buildPatterns(steps, n_motors, patterns, &section_len, &reps);
+    if (!ok) {
+        printf("  " RED "[FAIL]" RESET "  %s  buildPatterns failed\n", label);
+        (*failed)++;
+        return 0;
+    }
+    if (section_len == 0 && reps == 0) {
+        int all_zero = 1;
+        for (int m = 0; m < n_motors; m++) if (steps[m] != 0) { all_zero = 0; break; }
+        /* buildPatterns does not allocate when max_steps==0; do not free patterns[] */
+        if (all_zero) {
+            printf("  " GREEN "[PASS]" RESET "  %s  (all zero)\n", label);
+            (*passed)++;
+            return 1;
+        }
+    }
+    int err = 0;
+    for (int m = 0; m < n_motors; m++) {
+        int sum = 0;
+        for (int t = 0; t < section_len; t++) sum += patterns[m][t];
+        if (sum * reps != steps[m]) {
+            err = 1;
+            printf("  " RED "[FAIL]" RESET "  %s  motor %d: pattern sum*reps=%d expected %d\n",
+                   label, m + 1, sum * reps, steps[m]);
+            break;
+        }
+    }
+    if (section_len > 0) {
+        for (int m = 0; m < n_motors; m++) free(patterns[m]);
+    }
+    if (err) { (*failed)++; return 0; }
+    printf("  " GREEN "[PASS]" RESET "  %s  (section_len=%d reps=%d)\n", label, section_len, reps);
+    (*passed)++;
+    return 1;
+}
+
+void run_selftest(void) {
+    clearScreen();
+    printHeader("SELFTEST");
+    printf("  Verifying inverse kinematics and tick pattern calculations.\n\n");
+
+    int passed = 0, failed = 0;
+    double L1 = 500.0, L2 = 525.0;
+
+    printf("  " BABY_BLUE "Inverse kinematics (L1=500, L2=525 mm)" RESET "\n");
+    /* Reachable cases: (x, z, base) -> (base, shoulder_motor, elbow_motor) */
+    selftest_ik_one(L1, L2, 1025, 0, 0, 1, 0, 0, 0,
+                   "Full stretch +x", &passed, &failed);
+    selftest_ik_one(L1, L2, -1025, 0, 0, 1, 0, 2880, 0,
+                   "Full stretch -x", &passed, &failed);
+    selftest_ik_one(L1, L2, 0, 0, 1025, 1, 0, 1440, 0,
+                   "Straight up (z only)", &passed, &failed);
+    selftest_ik_one(L1, L2, 0, 0, -1025, 1, 0, -1440, 0,
+                   "Straight down (negative z)", &passed, &failed);
+    selftest_ik_one(L1, L2, 500, 0, 525, 1, 0, 0, 1440,
+                   "90° elbow at (500,525)", &passed, &failed);
+    selftest_ik_one(L1, L2, 25, 0, 0, 1, 0, -2880, 2880,
+                   "Min reach folded (25,0)", &passed, &failed);  /* shoulder ±tolerance from truncation */
+    selftest_ik_one(L1, L2, 1025, 90, 0, 1, 90, 0, 0,
+                   "Base angle 90°", &passed, &failed);
+    selftest_ik_one(L1, L2, 725, 0, 0, 1, 0, -736, 1440,
+                   "Horizontal 725 mm (elbow 90°)", &passed, &failed);
+    /* Out of reach */
+    selftest_ik_one(L1, L2, 1500, 0, 0, 0, 0, 0, 0,
+                   "Out of reach (too far)", &passed, &failed);
+    selftest_ik_one(L1, L2, 0, 0, 0, 0, 0, 0, 0,
+                   "Out of reach (origin)", &passed, &failed);
+    selftest_ik_one(L1, L2, 1026, 0, 0, 0, 0, 0, 0,
+                   "Out of reach (just beyond max)", &passed, &failed);
+    selftest_ik_one(L1, L2, 24, 0, 0, 0, 0, 0, 0,
+                   "Out of reach (just inside min)", &passed, &failed);
+    /* Edge: equal segments */
+    selftest_ik_one(400.0, 400.0, 800, 0, 0, 1, 0, 0, 0,
+                   "Equal segments L1=L2=400 full stretch", &passed, &failed);
+    selftest_ik_one(400.0, 400.0, 0, 0, 0, 1, 0, -1440, 2880,
+                   "Equal segments origin (folded, L1=L2)", &passed, &failed);
+    selftest_ik_one(525.0, 500.0, 1025, 0, 0, 1, 0, 0, 0,
+                   "L1>L2 full stretch (525,500)", &passed, &failed);
+
+    printf("\n  " BABY_BLUE "Tick patterns (Bresenham)" RESET "\n");
+    int s0[3] = { 0, 0, 0 };
+    selftest_tick_one(s0, 3, "All zeros", &passed, &failed);
+    int s1[3] = { 100, 0, 0 };
+    selftest_tick_one(s1, 3, "Single motor (100,0,0)", &passed, &failed);
+    int s2[3] = { 0, 100, 0 };
+    selftest_tick_one(s2, 3, "Single motor (0,100,0)", &passed, &failed);
+    int s2b[3] = { 0, 0, 100 };
+    selftest_tick_one(s2b, 3, "Single motor (0,0,100)", &passed, &failed);
+    int s3[3] = { 100, 100, 100 };
+    selftest_tick_one(s3, 3, "Equal (100,100,100)", &passed, &failed);
+    int s4[3] = { 200, 200, 200 };
+    selftest_tick_one(s4, 3, "Equal (200,200,200)", &passed, &failed);
+    int s5[3] = { 7, 11, 13 };
+    selftest_tick_one(s5, 3, "Coprime (7,11,13)", &passed, &failed);
+    int s6[3] = { 16, 32, 48 };
+    selftest_tick_one(s6, 3, "GCD=16 (16,32,48)", &passed, &failed);
+    int s7[3] = { 1, 1, 1 };
+    selftest_tick_one(s7, 3, "Minimal (1,1,1)", &passed, &failed);
+    int s8[3] = { 1, 0, 0 };
+    selftest_tick_one(s8, 3, "Single step (1,0,0)", &passed, &failed);
+    int s8b[3] = { 0, 0, 1 };
+    selftest_tick_one(s8b, 3, "Single step (0,0,1)", &passed, &failed);
+    int s9[3] = { 1000, 500, 250 };
+    selftest_tick_one(s9, 3, "Large (1000,500,250)", &passed, &failed);
+    int s10[3] = { 17, 17, 17 };
+    selftest_tick_one(s10, 3, "Equal prime (17,17,17)", &passed, &failed);
+    int s11[3] = { 64, 128, 192 };
+    selftest_tick_one(s11, 3, "GCD=64 (64,128,192)", &passed, &failed);
+    int s12[3] = { 3, 6, 9 };
+    selftest_tick_one(s12, 3, "Small GCD=3 (3,6,9)", &passed, &failed);
+
+    /* Step conversion consistency: IK angles -> steps -> pattern total */
+    printf("\n  " BABY_BLUE "IK -> steps -> pattern consistency" RESET "\n");
+    int angles_test[3] = { 0, 1440, 720 };  /* base 0, shoulder 90° motor, elbow 45° motor */
+    int step_counts[3];
+    for (int m = 0; m < 3; m++)
+        step_counts[m] = (int)((double)abs(angles_test[m]) * STEPS_PER_REV / 360.0);
+    int *pat[MAX_MOTORS];
+    int sec_len, reps;
+    if (buildPatterns(step_counts, 3, pat, &sec_len, &reps)) {
+        int cons_ok = 1;
+        for (int m = 0; m < 3; m++) {
+            int sum = 0;
+            for (int t = 0; t < sec_len; t++) sum += pat[m][t];
+            if (sum * reps != step_counts[m]) cons_ok = 0;
+            free(pat[m]);
+        }
+        if (cons_ok) {
+            printf("  " GREEN "[PASS]" RESET "  IK angles -> steps -> pattern totals match\n");
+            passed++;
+        } else {
+            printf("  " RED "[FAIL]" RESET "  IK angles -> steps -> pattern totals mismatch\n");
+            failed++;
+        }
+    } else {
+        printf("  " RED "[FAIL]" RESET "  IK angles -> steps -> pattern build failed\n");
+        failed++;
+    }
+
+    printDivider();
+    if (failed == 0)
+        printf("  " GREEN "All %d tests passed." RESET "\n", passed);
+    else
+        printf("  " RED "%d failed" RESET ", " GREEN "%d passed" RESET "\n", failed, passed);
+    printf("\n  Press any key to return to Main Menu...\n");
+    clearInputBuffer();
+    getchar();
+    menuStructure();
+}
+
 void menuStructure(void) {
     clearScreen();
     printHeader("MAIN MENU");
     printf("  " DIM "[1]" RESET "  Inverse Kinematics\n");
     printf("  " DIM "[2]" RESET "  Raw Movement\n");
-    printf("  " DIM "[3]" RESET "  Exit\n\n");
+    printf("  " DIM "[3]" RESET "  Self-test\n");
+    printf("  " DIM "[4]" RESET "  Exit\n\n");
     printPrompt();
 
     if (scanf("%d", &choice) != 1) { clearInputBuffer(); menuStructure(); return; }
     if (choice == 1)      inverseKinematicsMenu();
     else if (choice == 2) rawMovementMenu();
-    else if (choice == 3) printGoodbye();
+    else if (choice == 3) run_selftest();
+    else if (choice == 4) printGoodbye();
     else                  menuStructure();
 }
 
