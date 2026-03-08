@@ -315,8 +315,8 @@ int showTickPatternScreen(int *step_counts, int n_motors) {
 
     if (section_len == 0) {
         printf("  " YELLOW "All motors at 0 steps — no movement." RESET "\n\n");
-        printf("  [1]  Execute anyway\n");
-        printf("  [2]  Cancel\n\n");
+        printf("  " DIM "[1]" RESET "  Execute anyway\n");
+        printf("  " DIM "[2]" RESET "  Cancel\n\n");
         printPrompt();
         int conf;
         scanf("%d", &conf);
@@ -348,9 +348,9 @@ int showTickPatternScreen(int *step_counts, int n_motors) {
     }
 
     printf("\n");
-    printf("  [1]  Execute " DIM "(simultaneous)" RESET "\n");
-    printf("  [2]  Execute " DIM "(sequential)" RESET "\n");
-    printf("  [3]  Cancel\n\n");
+    printf("  " DIM "[1]" RESET "  Execute " DIM "(simultaneous)" RESET "\n");
+    printf("  " DIM "[2]" RESET "  Execute " DIM "(sequential)" RESET "\n");
+    printf("  " DIM "[3]" RESET "  Cancel\n\n");
     printPrompt();
 
     int conf;
@@ -564,8 +564,8 @@ void getTargetCoords(void) {
     printf("  %-18s  " BABY_BLUE "%d\xc2\xb0" RESET "\n", "Base angle (Y)",   targetcoords[1]);
     printf("  %-18s  " BABY_BLUE "%d mm" RESET "\n",  "Z (height)",      targetcoords[2]);
     printf("\n");
-    printf("  [1]  Confirm\n");
-    printf("  [2]  Re-enter\n\n");
+    printf("  " DIM "[1]" RESET "  Confirm\n");
+    printf("  " DIM "[2]" RESET "  Re-enter\n\n");
     printPrompt();
 
     scanf("%d", &choice);
@@ -592,8 +592,8 @@ void getCoords(void) {
     printf("  %-18s  " BABY_BLUE "%d\xc2\xb0" RESET "\n", "Base angle (Y)",  initcoords[1]);
     printf("  %-18s  " BABY_BLUE "%d mm" RESET "\n",  "Z (height)",     initcoords[2]);
     printf("\n");
-    printf("  [1]  Confirm\n");
-    printf("  [2]  Re-enter\n\n");
+    printf("  " DIM "[1]" RESET "  Confirm\n");
+    printf("  " DIM "[2]" RESET "  Re-enter\n\n");
     printPrompt();
 
     scanf("%d", &choice);
@@ -635,8 +635,8 @@ void inverseKinematicsMenu(void) {
     clearScreen();
     printHeader("INVERSE KINEMATICS");
     printf("  " DIM "Default segment lengths:  L1 = 500 mm  \xc2\xb7  L2 = 525 mm" RESET "\n\n");
-    printf("  [1]  Use default lengths\n");
-    printf("  [2]  Set custom lengths\n\n");
+    printf("  " DIM "[1]" RESET "  Use default lengths\n");
+    printf("  " DIM "[2]" RESET "  Set custom lengths\n\n");
     printPrompt();
 
     if (scanf("%d", &choice) != 1) { clearInputBuffer(); inverseKinematicsMenu(); return; }
@@ -652,8 +652,8 @@ void getRawAngles(void) {
     clearScreen();
     printHeader("RAW ANGLE ENTRY");
     printf("  Choose which side of the gearbox to specify angles from:\n\n");
-    printf("  [1]  Joint side   " DIM "(physical arm output — what you see)" RESET "\n");
-    printf("  [2]  Motor side   " DIM "(motor shaft input — before gearbox)" RESET "\n\n");
+    printf("  " DIM "[1]" RESET "  Joint side   " DIM "(physical arm output — what you see)" RESET "\n");
+    printf("  " DIM "[2]" RESET "  Motor side   " DIM "(motor shaft input — before gearbox)" RESET "\n\n");
     printPrompt();
 
     int angle_mode;
@@ -707,8 +707,8 @@ void getRawAngles(void) {
                    rawSteps[m], rawDirs[m] ? "CW" : "CCW");
     }
     printf("\n");
-    printf("  [1]  Confirm\n");
-    printf("  [2]  Re-enter\n\n");
+    printf("  " DIM "[1]" RESET "  Confirm\n");
+    printf("  " DIM "[2]" RESET "  Re-enter\n\n");
     printPrompt();
 
     scanf("%d", &choice);
@@ -750,8 +750,8 @@ void getRawMotorData(void) {
         printf("  Motor %d  %-9s  " BABY_BLUE "%d steps" RESET "  " DIM "%s" RESET "\n",
                m + 1, names[m], rawSteps[m], rawDirs[m] ? "CW" : "CCW");
     printf("\n");
-    printf("  [1]  Confirm\n");
-    printf("  [2]  Re-enter\n\n");
+    printf("  " DIM "[1]" RESET "  Confirm\n");
+    printf("  " DIM "[2]" RESET "  Re-enter\n\n");
     printPrompt();
 
     scanf("%d", &choice);
@@ -766,9 +766,9 @@ void rawMovementMenu(void) {
     clearScreen();
     printHeader("RAW MOVEMENT");
     printf("  Drive motors directly, bypassing inverse kinematics.\n\n");
-    printf("  [1]  Enter step counts\n");
-    printf("  [2]  Enter angles\n");
-    printf("  [3]  Back to Main Menu\n\n");
+    printf("  " DIM "[1]" RESET "  Enter step counts\n");
+    printf("  " DIM "[2]" RESET "  Enter angles\n");
+    printf("  " DIM "[3]" RESET "  Back to Main Menu\n\n");
     printPrompt();
 
     if (scanf("%d", &choice) != 1) { clearInputBuffer(); rawMovementMenu(); return; }
@@ -781,9 +781,9 @@ void rawMovementMenu(void) {
 void menuStructure(void) {
     clearScreen();
     printHeader("MAIN MENU");
-    printf("  [1]  Inverse Kinematics\n");
-    printf("  [2]  Raw Movement\n");
-    printf("  [3]  Exit\n\n");
+    printf("  " DIM "[1]" RESET "  Inverse Kinematics\n");
+    printf("  " DIM "[2]" RESET "  Raw Movement\n");
+    printf("  " DIM "[3]" RESET "  Exit\n\n");
     printPrompt();
 
     if (scanf("%d", &choice) != 1) { clearInputBuffer(); menuStructure(); return; }
