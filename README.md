@@ -61,7 +61,7 @@ steps = |angle_deg| × 200 / 360
 
 For the shoulder and elbow, `angle_deg` is the already-scaled motor-side angle (joint angle × 16), so no additional gearbox math is needed at the step-generation stage. For the base, `angle_deg` is the raw joint angle.
 
-The sign of the angle determines the direction pin state: positive angles set DIR high (CW), negative angles set DIR low (CCW). Each step is a single LOW→HIGH→LOW pulse on the STEP pin, with `STEP_DELAY_US` (1500 µs) between each transition. That gives a stepping rate of ~333 steps/second, or roughly 6 RPM at the motor shaft.
+The sign of the angle determines the direction pin state: positive angles set DIR high (CW), negative angles set DIR low (CCW). Each step is a single LOW→HIGH→LOW pulse on the STEP pin, with `STEP_DELAY_US` (15000 µs) between each transition. That gives a stepping rate of ~33 steps/second, or roughly 10 RPM at the motor shaft.
 
 ## Hardware: GPIO Pin Mapping
 
@@ -307,7 +307,7 @@ Each `value` file is opened, written (`"0"` or `"1"`), and closed on every singl
 
 ## Program Flow
 
-The program is a menu-driven TUI using ANSI escape codes for color and screen clearing:
+The program is a menu-driven TUI using ANSI escape codes for color and screen clearing. Headings and key values (coordinates, angles, step counts, etc.) are highlighted in baby blue (RGB 137,207,240) for readability.
 
 ```
 main

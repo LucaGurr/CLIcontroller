@@ -5,7 +5,7 @@
 #include <stdarg.h>
 #include <string.h>
 
-#define BABY_BLUE "\x1b[94m"
+#define BABY_BLUE "\x1b[38;2;137;207;240m"  /* RGB(137,207,240) baby blue */
 #define RED       "\x1b[31m"
 #define GREEN     "\x1b[32m"
 #define YELLOW    "\x1b[33m"
