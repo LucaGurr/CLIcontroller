@@ -109,7 +109,6 @@ static void printSplash(void) {
     printf("    ██  ██  ██      ██      ██      ██   ██ \n");
     printf("    ██  ██  ██████  ██████  ██████   █████  \n");
     printf("\n");
-    printf("               " DIM "robot arm controller" RESET "\n");
     printf("\n" RESET);
     fflush(stdout);
     sleep(2);
@@ -125,7 +124,6 @@ static void printGoodbye(void) {
     printf("             ██   ██    ██    ██     \n");
     printf("             ██████     ██    ██████ \n");
     printf("\n");
-    printf("                " DIM "system powering down" RESET "\n");
     printf("\n" RESET);
     fflush(stdout);
     sleep(2);
