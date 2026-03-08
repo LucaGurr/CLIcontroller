@@ -3,14 +3,14 @@
 #include <math.h>
 #include <unistd.h>
 #include <stdarg.h>
+#include <string.h>
 
-#define BLUE      "\x1b[34m"
+#define BABY_BLUE "\x1b[94m"
 #define RED       "\x1b[31m"
 #define GREEN     "\x1b[32m"
 #define YELLOW    "\x1b[33m"
-#define BABY_BLUE "\x1b[94m"
+#define DIM       "\x1b[2m"
 #define RESET     "\x1b[0m"
-#define PI     3.14159265358979323846
 
 #define MOTOR1_STEP_PIN  17
 #define MOTOR1_DIR_PIN   27
@@ -25,11 +25,13 @@
 #define GPIO_BASE_PATH "/sys/class/gpio"
 #endif
 
+#define PI                 3.14159265358979323846
 #define STEPS_PER_REV      200
 #define STEP_DELAY_US      15000
 #define MAX_MOTORS         4
 #define DISPLAY_LINE_WIDTH 64
 #define GEARBOX_RATIO      16
+#define RULE_WIDTH         48
 
 static const int ALL_PINS[] = {
     MOTOR1_STEP_PIN, MOTOR1_DIR_PIN,
@@ -37,7 +39,7 @@ static const int ALL_PINS[] = {
     MOTOR3_STEP_PIN, MOTOR3_DIR_PIN,
     MOTOR4_STEP_PIN, MOTOR4_DIR_PIN
 };
-#define NUM_PINS  ((int)(sizeof(ALL_PINS) / sizeof(ALL_PINS[0])))
+#define NUM_PINS ((int)(sizeof(ALL_PINS) / sizeof(ALL_PINS[0])))
 
 static const int motorPins[4][2] = {
     {MOTOR1_STEP_PIN, MOTOR1_DIR_PIN},
@@ -53,12 +55,13 @@ void getRawMotorData(void);
 void getRawAngles(void);
 
 int choice;
-int lengths         [2] = {500, 525};
-int initcoords      [3] = {0};
-int targetcoords    [3] = {0};
-int angles          [4] = {0};
-int rawSteps        [3] = {0};
-int rawDirs         [3] = {0};
+int lengths      [2] = {500, 525};
+int initcoords   [3] = {0};
+int targetcoords [3] = {0};
+int angles       [4] = {0};
+int rawSteps     [3] = {0};
+int rawDirs      [3] = {0};
+
 
 static void clearScreen(void) {
     printf("\x1b[3J\x1b[H\x1b[2J");
@@ -70,16 +73,46 @@ static void clearInputBuffer(void) {
     while ((c = getchar()) != '\n' && c != EOF);
 }
 
+static void printHeader(const char *title) {
+    int i;
+    printf("\n  " BABY_BLUE "%s" RESET "\n  " BABY_BLUE, title);
+    for (i = 0; i < RULE_WIDTH; i++) printf("\xe2\x94\x80");
+    printf(RESET "\n\n");
+}
+
+static void printDivider(void) {
+    int i;
+    printf("\n  " DIM);
+    for (i = 0; i < RULE_WIDTH; i++) printf("\xe2\x94\x80");
+    printf(RESET "\n\n");
+}
+
+static void printPrompt(void) {
+    printf("  " BABY_BLUE ">" RESET " ");
+    fflush(stdout);
+}
+
+static void printOk(const char *msg) {
+    printf("  " GREEN "[+]" RESET "  %s\n", msg);
+}
+
+static void printErr(const char *msg) {
+    printf("\n  " RED "[!]" RESET "  %s\n\n", msg);
+}
+
 static void printSplash(void) {
     clearScreen();
     printf(BABY_BLUE);
     printf("\n");
-    printf("       _  _ ___ _    _    ___           \n");
-    printf("      | || | __| |  | |  / _ \\          \n");
-    printf("      | __ | _|| |__| |_| (_) |         \n");
-    printf("      |_||_|___|____|____\\___/           \n");
+    /* HELLO — filled block letters, 7 cols each, 2-space gap */
+    printf("    \xe2\x96\x88\xe2\x96\x88   \xe2\x96\x88\xe2\x96\x88  \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88  \xe2\x96\x88\xe2\x96\x88       \xe2\x96\x88\xe2\x96\x88        \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88 \n");
+    printf("    \xe2\x96\x88\xe2\x96\x88   \xe2\x96\x88\xe2\x96\x88  \xe2\x96\x88\xe2\x96\x88       \xe2\x96\x88\xe2\x96\x88       \xe2\x96\x88\xe2\x96\x88       \xe2\x96\x88\xe2\x96\x88   \xe2\x96\x88\xe2\x96\x88\n");
+    printf("    \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88  \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88    \xe2\x96\x88\xe2\x96\x88       \xe2\x96\x88\xe2\x96\x88       \xe2\x96\x88\xe2\x96\x88   \xe2\x96\x88\xe2\x96\x88\n");
+    printf("    \xe2\x96\x88\xe2\x96\x88   \xe2\x96\x88\xe2\x96\x88  \xe2\x96\x88\xe2\x96\x88       \xe2\x96\x88\xe2\x96\x88       \xe2\x96\x88\xe2\x96\x88       \xe2\x96\x88\xe2\x96\x88   \xe2\x96\x88\xe2\x96\x88\n");
+    printf("    \xe2\x96\x88\xe2\x96\x88   \xe2\x96\x88\xe2\x96\x88  \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88  \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88  \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88   \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88 \n");
     printf("\n");
-    printf(RESET);
+    printf("              " DIM "robot arm controller" RESET "\n");
+    printf("\n" RESET);
     fflush(stdout);
     sleep(2);
 }
@@ -88,12 +121,12 @@ static void printGoodbye(void) {
     clearScreen();
     printf(BABY_BLUE);
     printf("\n");
-    printf("    ___  ___   ___  ___  _____   _____  \n");
-    printf("   / __|/ _ \\ / _ \\|   \\| _ ) \\ / / __| \n");
-    printf("  | (_ | (_) | (_) | |) | _ \\ V /| _|   \n");
-    printf("   \\___|\\___/ \\___/|___/|___/ |_| |___|  \n");
-    printf("\n");
-    printf(RESET);
+    printf("   \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88  \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88  \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88  \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88  \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88  \xe2\x96\x88\xe2\x96\x88   \xe2\x96\x88\xe2\x96\x88 \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\n");
+    printf("  \xe2\x96\x88\xe2\x96\x88      \xe2\x96\x88\xe2\x96\x88   \xe2\x96\x88\xe2\x96\x88 \xe2\x96\x88\xe2\x96\x88   \xe2\x96\x88\xe2\x96\x88 \xe2\x96\x88\xe2\x96\x88   \xe2\x96\x88\xe2\x96\x88 \xe2\x96\x88\xe2\x96\x88   \xe2\x96\x88\xe2\x96\x88  \xe2\x96\x88\xe2\x96\x88 \xe2\x96\x88\xe2\x96\x88  \xe2\x96\x88\xe2\x96\x88     \n");
+    printf("  \xe2\x96\x88\xe2\x96\x88  \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88 \xe2\x96\x88\xe2\x96\x88   \xe2\x96\x88\xe2\x96\x88 \xe2\x96\x88\xe2\x96\x88   \xe2\x96\x88\xe2\x96\x88 \xe2\x96\x88\xe2\x96\x88   \xe2\x96\x88\xe2\x96\x88 \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88   \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88   \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88  \n");
+    printf("  \xe2\x96\x88\xe2\x96\x88   \xe2\x96\x88\xe2\x96\x88 \xe2\x96\x88\xe2\x96\x88   \xe2\x96\x88\xe2\x96\x88 \xe2\x96\x88\xe2\x96\x88   \xe2\x96\x88\xe2\x96\x88 \xe2\x96\x88\xe2\x96\x88   \xe2\x96\x88\xe2\x96\x88 \xe2\x96\x88\xe2\x96\x88   \xe2\x96\x88\xe2\x96\x88    \xe2\x96\x88\xe2\x96\x88   \xe2\x96\x88\xe2\x96\x88     \n");
+    printf("   \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88  \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88  \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88  \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88  \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88    \xe2\x96\x88\xe2\x96\x88   \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\n");
+    printf("\n" RESET);
     fflush(stdout);
     sleep(2);
     clearScreen();
@@ -110,6 +143,7 @@ void log_activity(const char *fmt, ...) {
     fprintf(f, "\n");
     fclose(f);
 }
+
 
 void gpio_export(int pin) {
     char path[64];
@@ -241,9 +275,7 @@ static int buildPatterns(int *step_counts, int n_motors,
 }
 
 static void printRuler(int tick_start, int tick_end, int prefix_len) {
-    int show_hundreds = (tick_end > 99);
-
-    if (show_hundreds) {
+    if (tick_end > 99) {
         printf("%*s", prefix_len, "");
         for (int t = tick_start; t < tick_end; t++) {
             int col = t + 1;
@@ -271,29 +303,31 @@ static void printRuler(int tick_start, int tick_end, int prefix_len) {
     printf("\n");
 }
 
-/* Returns: 0 = cancel, 1 = execute simultaneous, 2 = execute sequential */
 int showTickPatternScreen(int *step_counts, int n_motors) {
     static const char *names[] = {"Base", "Shoulder", "Elbow", "End Effector"};
     int *patterns[MAX_MOTORS];
-    int section_len, reps;
+    int  section_len, reps;
 
     if (!buildPatterns(step_counts, n_motors, patterns, &section_len, &reps)) {
-        printf("    %sPattern generation failed.%s\n", RED, RESET);
+        printErr("Pattern generation failed.");
         return 0;
     }
 
     clearScreen();
-    printf("%sTICK PATTERN%s\n", BLUE, RESET);
+    printHeader("TICK PATTERN");
 
     if (section_len == 0) {
-        printf("    %sAll motors at 0 steps — no movement.%s\n\n", YELLOW, RESET);
-        printf("    %s1)%s Execute anyway   %s2)%s Cancel\n    ", RED, RESET, RED, RESET);
+        printf("  " YELLOW "All motors at 0 steps — no movement." RESET "\n\n");
+        printf("  [1]  Execute anyway\n");
+        printf("  [2]  Cancel\n\n");
+        printPrompt();
         int conf;
         scanf("%d", &conf);
         return conf == 1 ? 1 : 0;
     }
 
-    printf("    Section: %d ticks  x  %d repetitions\n\n", section_len, reps);
+    printf("  Section  " BABY_BLUE "%d ticks" RESET "  \xc3\x97  " BABY_BLUE "%d repetitions" RESET "\n\n",
+           section_len, reps);
 
     int rows       = (section_len + DISPLAY_LINE_WIDTH - 1) / DISPLAY_LINE_WIDTH;
     int prefix_len = 24;
@@ -306,20 +340,21 @@ int showTickPatternScreen(int *step_counts, int n_motors) {
         printRuler(tick_start, tick_end, prefix_len);
 
         for (int m = 0; m < n_motors; m++) {
-            printf("    Motor %d  %-13s ", m + 1, names[m]);
+            printf("  Motor %d  %-13s ", m + 1, names[m]);
             for (int t = tick_start; t < tick_end; t++) {
-                if (patterns[m][t])
-                    printf(GREEN "\xe2\x96\x88" RESET);
-                else
-                    printf(RED   "\xe2\x96\x88" RESET);
+                if (patterns[m][t]) printf(GREEN  "\xe2\x96\x88" RESET);
+                else                printf(RED    "\xe2\x96\x88" RESET);
             }
-            printf("  %d steps\n", step_counts[m]);
+            printf("  " DIM "%d steps" RESET "\n", step_counts[m]);
         }
         if (row < rows - 1) printf("\n");
     }
 
-    printf("\n    %s1)%s Execute (simultaneous)   %s2)%s Execute (sequential)   %s3)%s Cancel\n    ",
-           RED, RESET, RED, RESET, RED, RESET);
+    printf("\n");
+    printf("  [1]  Execute " DIM "(simultaneous)" RESET "\n");
+    printf("  [2]  Execute " DIM "(sequential)" RESET "\n");
+    printf("  [3]  Cancel\n\n");
+    printPrompt();
 
     int conf;
     scanf("%d", &conf);
@@ -331,19 +366,19 @@ int showTickPatternScreen(int *step_counts, int n_motors) {
     return 0;
 }
 
+
 void driveMotorsSimultaneous(int *step_counts, int *dirs, int n_motors,
                              int *step_pins, int *dir_pins) {
     static const char *names[] = {"Base", "Shoulder", "Elbow", "End Effector"};
     int *patterns[MAX_MOTORS];
-    int section_len, reps;
+    int  section_len, reps;
 
     if (!buildPatterns(step_counts, n_motors, patterns, &section_len, &reps)) {
-        printf("    %sPattern generation failed. Aborting.%s\n", RED, RESET);
+        printErr("Pattern generation failed. Aborting.");
         return;
     }
-
     if (section_len == 0) {
-        printf("    %sNo movement required.%s\n", YELLOW, RESET);
+        printf("  " YELLOW "No movement required." RESET "\n");
         return;
     }
 
@@ -355,11 +390,10 @@ void driveMotorsSimultaneous(int *step_counts, int *dirs, int n_motors,
                         " M%d %s %dsteps |", m + 1, dirs[m] ? "CW" : "CCW", step_counts[m]);
     log_activity("%s", log_buf);
 
-    for (int m = 0; m < n_motors; m++)
-        gpio_write(dir_pins[m], dirs[m]);
+    for (int m = 0; m < n_motors; m++) gpio_write(dir_pins[m], dirs[m]);
     usleep(STEP_DELAY_US);
 
-    for (int rep = 0; rep < reps; rep++) {
+    for (int rep = 0; rep < reps; rep++)
         for (int tick = 0; tick < section_len; tick++) {
             for (int m = 0; m < n_motors; m++)
                 if (patterns[m][tick]) gpio_write(step_pins[m], 1);
@@ -368,7 +402,6 @@ void driveMotorsSimultaneous(int *step_counts, int *dirs, int n_motors,
                 if (patterns[m][tick]) gpio_write(step_pins[m], 0);
             usleep(STEP_DELAY_US);
         }
-    }
 
     pos = 0;
     pos += snprintf(log_buf + pos, sizeof(log_buf) - pos, "DONE: Simultaneous |");
@@ -390,8 +423,8 @@ void driveMotorsSequential(int *step_counts, int *dirs, int n_motors,
         log_activity("DRIVE: Motor %d (%s) | DIR=%s | Steps=%d",
                      m + 1, names[m], dirs[m] ? "CW" : "CCW", step_counts[m]);
 
-        printf("    Motor %d %-9s  GPIO %d DIR=%s, pulsing %d steps...\n",
-               m + 1, names[m], dir_pins[m], dirs[m] ? "CW" : "CCW", step_counts[m]);
+        printf("  Motor %d  %-9s  %s  \xe2\x86\x92  %d steps\n",
+               m + 1, names[m], dirs[m] ? "CW " : "CCW", step_counts[m]);
 
         gpio_write(dir_pins[m], dirs[m]);
         usleep(STEP_DELAY_US);
@@ -410,22 +443,24 @@ void driveMotorsSequential(int *step_counts, int *dirs, int n_motors,
 static void executeDriver(int *step_counts, int *dirs, int n_motors,
                           int *step_pins, int *dir_pins, int mode) {
     clearScreen();
-    printf("%sDRIVER PASSING%s\n", BLUE, RESET);
-    printf("    Initializing GPIO pins...\n");
+    printHeader("EXECUTING");
+
+    printf("  Initializing GPIO pins...\n");
     gpio_init();
 
     if (mode == 1) {
-        printf("    Driving motors simultaneously...\n\n");
+        printf("  Driving motors simultaneously...\n\n");
         driveMotorsSimultaneous(step_counts, dirs, n_motors, step_pins, dir_pins);
     } else {
-        printf("    Driving motors sequentially...\n\n");
+        printf("  Driving motors sequentially...\n\n");
         driveMotorsSequential(step_counts, dirs, n_motors, step_pins, dir_pins);
     }
 
     gpio_cleanup();
 
-    printf("\n    %sAll motors driven to target!%s\n", GREEN, RESET);
-    printf("    %sPress any key to return to Main Menu...%s\n", YELLOW, RESET);
+    printf("\n");
+    printOk("All motors driven to target!");
+    printf("\n  Press any key to return to Main Menu...\n");
     clearInputBuffer();
     getchar();
     menuStructure();
@@ -451,25 +486,26 @@ void passRawToDriver(int mode) {
     executeDriver(rawSteps, rawDirs, 3, step_pins, dir_pins, mode);
 }
 
+
 void InverseKinematicsCalculations(void) {
     clearScreen();
-    printf("%sINVERSE KINEMATICS CALCULATIONS%s\n", BLUE, RESET);
-    printf("    Calculating the joint angles for the given target coordinates...\n\n");
+    printHeader("CALCULATING");
+    printf("  Computing joint angles...\n\n");
 
     double L1        = (double)lengths[0];
     double L2        = (double)lengths[1];
     double x         = (double)targetcoords[0];
     double baseAngle = (double)targetcoords[1];
     double z         = (double)targetcoords[2];
-
-    double dist = sqrt(x * x + z * z);
+    double dist      = sqrt(x * x + z * z);
 
     if (dist > (L1 + L2) || dist < fabs(L1 - L2)) {
         clearScreen();
-        printf("%sOOR EXCEPTION%s\n", RED, RESET);
-        printf("%sERROR:%s Target (%.0f, %.0f) out of reach!\n", RED, RESET, x, z);
-        printf("    Max reach: %.0f mm, Target distance: %.2f mm\n", L1 + L2, dist);
-        printf("    Press any key to return...");
+        printHeader("OUT OF REACH");
+        printErr("Target coordinates are out of reach.");
+        printf("  Max reach      " BABY_BLUE "%.0f mm" RESET "\n", L1 + L2);
+        printf("  Target dist    " RED       "%.0f mm" RESET "\n", dist);
+        printf("\n  Press any key to re-enter coordinates...\n");
         clearInputBuffer();
         getchar();
         getTargetCoords();
@@ -483,22 +519,23 @@ void InverseKinematicsCalculations(void) {
     double q2 = acos(cosQ2);
     double q1 = atan2(z, x) - atan2(L2 * sin(q2), L1 + L2 * cos(q2));
 
-    /* Store motor-side angles (shoulder/elbow scaled by gearbox ratio) */
     angles[0] = (int)baseAngle;
     angles[1] = ((int)(q1 * 180.0 / PI)) * GEARBOX_RATIO;
     angles[2] = ((int)(q2 * 180.0 / PI)) * GEARBOX_RATIO;
 
     clearScreen();
-    printf("%sINVERSE KINEMATICS CALCULATIONS%s\n", BLUE, RESET);
-    printf("    %sCalculated Angles:%s\n", GREEN, RESET);
-    printf("    Base (Rot):  %d deg\n",   angles[0]);
-    printf("    Shoulder:    %d deg at motor  (%d deg at gearbox)\n",
-           angles[1], angles[1] / GEARBOX_RATIO);
-    printf("    Elbow:       %d deg at motor  (%d deg at gearbox)\n\n",
-           angles[2], angles[2] / GEARBOX_RATIO);
-    printf("    %sJoint angles are within limits.%s\n", GREEN, RESET);
-    printf("    %sArm can reach the target!%s\n",       GREEN, RESET);
-    printf("    %sPress any key to see tick pattern...%s\n", YELLOW, RESET);
+    printHeader("IK RESULTS");
+    printOk("Arm can reach the target.");
+    printf("\n");
+    printf("  %-24s  " BABY_BLUE "%4d" RESET " deg\n",
+           "Base (rotation)", angles[0]);
+    printf("  %-24s  " BABY_BLUE "%4d" RESET " deg motor  "
+           DIM "(%d deg joint)" RESET "\n",
+           "Shoulder", angles[1], angles[1] / GEARBOX_RATIO);
+    printf("  %-24s  " BABY_BLUE "%4d" RESET " deg motor  "
+           DIM "(%d deg joint)" RESET "\n",
+           "Elbow", angles[2], angles[2] / GEARBOX_RATIO);
+    printf("\n  Press any key to see tick pattern...\n");
     clearInputBuffer();
     getchar();
 
@@ -507,93 +544,120 @@ void InverseKinematicsCalculations(void) {
         step_counts[m] = (int)((double)abs(angles[m]) * STEPS_PER_REV / 360.0);
 
     int mode = showTickPatternScreen(step_counts, 3);
-    if (mode > 0)
-        passAnglesToDriver(mode);
-    else
-        menuStructure();
+    if (mode > 0) passAnglesToDriver(mode);
+    else          menuStructure();
 }
 
 void getTargetCoords(void) {
     clearScreen();
-    printf("%sTARGET COORDINATES MENU%s\n", BLUE, RESET);
-    printf("    Please enter coordinates (x, y, z):\n");
-    printf("    x,z = mm, y = degrees base rotation\n    Input format: x, y, z\n    ");
+    printHeader("TARGET COORDINATES");
+    printf("  Enter target position of the end effector.\n");
+    printf("  " DIM "x, z in mm  \xc2\xb7  y = base rotation in degrees  \xc2\xb7  format: x, y, z" RESET "\n\n");
+    printPrompt();
 
     if (scanf("%d, %d, %d", &targetcoords[0], &targetcoords[1], &targetcoords[2]) != 3) {
         clearInputBuffer();
-        printf("    %sInvalid input format. Try again.%s\n", RED, RESET);
+        printErr("Invalid format. Expected: x, y, z");
         getTargetCoords();
         return;
     }
 
-    printf("\n    %sX (Horizontal):%s %d mm\n", RED, RESET, targetcoords[0]);
-    printf("    %sBase Angle (Y):%s %d deg\n",  RED, RESET, targetcoords[1]);
-    printf("    %sZ (Height):    %s %d mm\n",   RED, RESET, targetcoords[2]);
-    printf("\n    %s1)%s Confirm and continue\n    %s2)%s Re-enter\n    ",
-           RED, RESET, RED, RESET);
+    printDivider();
+    printf("  %-18s  " BABY_BLUE "%d mm" RESET "\n",  "X (horizontal)",  targetcoords[0]);
+    printf("  %-18s  " BABY_BLUE "%d\xc2\xb0" RESET "\n", "Base angle (Y)",   targetcoords[1]);
+    printf("  %-18s  " BABY_BLUE "%d mm" RESET "\n",  "Z (height)",      targetcoords[2]);
+    printf("\n");
+    printf("  [1]  Confirm\n");
+    printf("  [2]  Re-enter\n\n");
+    printPrompt();
 
     scanf("%d", &choice);
     if (choice == 1) InverseKinematicsCalculations();
-    else getTargetCoords();
+    else             getTargetCoords();
 }
 
 void getCoords(void) {
     clearScreen();
-    printf("%sINITIAL COORDINATES MENU%s\n", BLUE, RESET);
-    printf("    Please enter coordinates (x, y, z):\n");
-    printf("    x,z = mm, y = degrees base rotation\n    Input format: x, y, z\n    ");
+    printHeader("INITIAL POSITION");
+    printf("  Enter the current arm position.\n");
+    printf("  " DIM "x, z in mm  \xc2\xb7  y = base rotation in degrees  \xc2\xb7  format: x, y, z" RESET "\n\n");
+    printPrompt();
 
     if (scanf("%d, %d, %d", &initcoords[0], &initcoords[1], &initcoords[2]) != 3) {
         clearInputBuffer();
-        printf("    %sInvalid input format. Try again.%s\n", RED, RESET);
+        printErr("Invalid format. Expected: x, y, z");
         getCoords();
         return;
     }
 
-    printf("\n    %sX (Horizontal):%s %d mm\n", RED, RESET, initcoords[0]);
-    printf("    %sBase Angle (Y):%s %d deg\n",  RED, RESET, initcoords[1]);
-    printf("    %sZ (Height):    %s %d mm\n",   RED, RESET, initcoords[2]);
-    printf("\n    %s1)%s Confirm and continue\n    %s2)%s Re-enter\n    ",
-           RED, RESET, RED, RESET);
+    printDivider();
+    printf("  %-18s  " BABY_BLUE "%d mm" RESET "\n",  "X (horizontal)", initcoords[0]);
+    printf("  %-18s  " BABY_BLUE "%d\xc2\xb0" RESET "\n", "Base angle (Y)",  initcoords[1]);
+    printf("  %-18s  " BABY_BLUE "%d mm" RESET "\n",  "Z (height)",     initcoords[2]);
+    printf("\n");
+    printf("  [1]  Confirm\n");
+    printf("  [2]  Re-enter\n\n");
+    printPrompt();
 
     scanf("%d", &choice);
     if (choice == 1) getTargetCoords();
-    else getCoords();
+    else             getCoords();
 }
 
 void customSecLenMenu(void) {
     clearScreen();
+    printHeader("CUSTOM ARM LENGTHS");
+    printf("  Enter segment lengths in millimetres.\n\n");
+
     int tempL1, tempL2;
-    printf("%sCUSTOM SECTION LENGTH MENU%s\n", BLUE, RESET);
-    printf("    Lower Section (L1) in mm: ");
-    if (scanf("%d", &tempL1) != 1) { clearInputBuffer(); customSecLenMenu(); return; }
-    printf("    Upper Section (L2) in mm: ");
-    if (scanf("%d", &tempL2) != 1) { clearInputBuffer(); customSecLenMenu(); return; }
+    printf("  Lower segment (L1):  ");
+    if (scanf("%d", &tempL1) != 1 || tempL1 <= 0) {
+        clearInputBuffer();
+        printErr("Invalid length.");
+        customSecLenMenu();
+        return;
+    }
+    printf("  Upper segment (L2):  ");
+    if (scanf("%d", &tempL2) != 1 || tempL2 <= 0) {
+        clearInputBuffer();
+        printErr("Invalid length.");
+        customSecLenMenu();
+        return;
+    }
     lengths[0] = tempL1;
     lengths[1] = tempL2;
+
+    printDivider();
+    printf("  L1  " BABY_BLUE "%d mm" RESET "\n", lengths[0]);
+    printf("  L2  " BABY_BLUE "%d mm" RESET "\n\n", lengths[1]);
+
     getCoords();
 }
 
 void inverseKinematicsMenu(void) {
     clearScreen();
-    printf("%sINVERSE KINEMATICS MENU%s:\n", BLUE, RESET);
-    printf("    %s1)%s Use default lengths (500/525)\n", RED, RESET);
-    printf("    %s2)%s Use custom lengths\n    ",         RED, RESET);
+    printHeader("INVERSE KINEMATICS");
+    printf("  " DIM "Default segment lengths:  L1 = 500 mm  \xc2\xb7  L2 = 525 mm" RESET "\n\n");
+    printf("  [1]  Use default lengths\n");
+    printf("  [2]  Set custom lengths\n\n");
+    printPrompt();
 
     if (scanf("%d", &choice) != 1) { clearInputBuffer(); inverseKinematicsMenu(); return; }
-    if (choice == 1) getCoords();
+    if (choice == 1)      getCoords();
     else if (choice == 2) customSecLenMenu();
-    else inverseKinematicsMenu();
+    else                  inverseKinematicsMenu();
 }
 
 void getRawAngles(void) {
-    static const char *names[]    = {"Base", "Shoulder", "Elbow"};
-    static const int  has_gear[]  = {0, 1, 1};
+    static const char *names[]   = {"Base", "Shoulder", "Elbow"};
+    static const int   has_gear[] = {0, 1, 1};
 
     clearScreen();
-    printf("%sRAW ANGLE ENTRY%s\n", BLUE, RESET);
-    printf("    Enter angles as:  %s1)%s Joint (gearbox output — physical arm)  "
-           "%s2)%s Motor (gearbox input — shaft)\n    ", RED, RESET, RED, RESET);
+    printHeader("RAW ANGLE ENTRY");
+    printf("  Choose which side of the gearbox to specify angles from:\n\n");
+    printf("  [1]  Joint side   " DIM "(physical arm output — what you see)" RESET "\n");
+    printf("  [2]  Motor side   " DIM "(motor shaft input — before gearbox)" RESET "\n\n");
+    printPrompt();
 
     int angle_mode;
     if (scanf("%d", &angle_mode) != 1 || (angle_mode != 1 && angle_mode != 2)) {
@@ -603,26 +667,26 @@ void getRawAngles(void) {
     }
 
     clearScreen();
-    printf("%sRAW ANGLE ENTRY%s  (%s)\n", BLUE, RESET,
+    printHeader("RAW ANGLE ENTRY");
+    printf("  Mode  " BABY_BLUE "%s" RESET "\n",
            angle_mode == 1 ? "joint side" : "motor side");
-    printf("    Enter signed angle in degrees (negative = CCW).\n\n");
+    printf("  " DIM "Enter signed degrees  (negative = CCW)" RESET "\n\n");
 
     int raw_angle[3];
     for (int m = 0; m < 3; m++) {
         if (angle_mode == 1 && has_gear[m])
-            printf("    Motor %d %-9s  Joint angle (deg): ", m + 1, names[m]);
+            printf("  Motor %d  %-9s  joint angle (deg):  ", m + 1, names[m]);
         else
-            printf("    Motor %d %-9s  Motor angle (deg): ", m + 1, names[m]);
+            printf("  Motor %d  %-9s  motor angle (deg):  ", m + 1, names[m]);
 
         if (scanf("%d", &raw_angle[m]) != 1) {
             clearInputBuffer();
-            printf("    %sInvalid input. Try again.%s\n", RED, RESET);
+            printErr("Invalid input. Try again.");
             getRawAngles();
             return;
         }
     }
 
-    /* Convert to motor-side steps */
     for (int m = 0; m < 3; m++) {
         int motor_angle = (angle_mode == 1 && has_gear[m])
                           ? raw_angle[m] * GEARBOX_RATIO
@@ -631,103 +695,105 @@ void getRawAngles(void) {
         rawSteps[m] = (int)((double)abs(motor_angle) * STEPS_PER_REV / 360.0);
     }
 
-    clearScreen();
-    printf("%sRAW ANGLE ENTRY%s\n", BLUE, RESET);
-    printf("    %sEntered Angles → Steps:%s\n", GREEN, RESET);
+    printDivider();
     for (int m = 0; m < 3; m++) {
         if (angle_mode == 1 && has_gear[m])
-            printf("    Motor %d %-9s  %d deg joint  →  %d deg motor  →  %d steps  %s\n",
-                   m + 1, names[m], raw_angle[m], raw_angle[m] * GEARBOX_RATIO,
+            printf("  Motor %d  %-9s  %4d\xc2\xb0 joint  \xe2\x86\x92  %4d\xc2\xb0 motor  \xe2\x86\x92  "
+                   BABY_BLUE "%d steps" RESET "  " DIM "%s" RESET "\n",
+                   m + 1, names[m], raw_angle[m],
+                   raw_angle[m] * GEARBOX_RATIO,
                    rawSteps[m], rawDirs[m] ? "CW" : "CCW");
         else
-            printf("    Motor %d %-9s  %d deg motor  →  %d steps  %s\n",
-                   m + 1, names[m], raw_angle[m], rawSteps[m], rawDirs[m] ? "CW" : "CCW");
+            printf("  Motor %d  %-9s  %4d\xc2\xb0 motor  \xe2\x86\x92  "
+                   BABY_BLUE "%d steps" RESET "  " DIM "%s" RESET "\n",
+                   m + 1, names[m], raw_angle[m],
+                   rawSteps[m], rawDirs[m] ? "CW" : "CCW");
     }
-    printf("\n    %s1)%s Confirm and continue\n    %s2)%s Re-enter\n    ",
-           RED, RESET, RED, RESET);
+    printf("\n");
+    printf("  [1]  Confirm\n");
+    printf("  [2]  Re-enter\n\n");
+    printPrompt();
 
     scanf("%d", &choice);
     if (choice != 1) { getRawAngles(); return; }
 
     int mode = showTickPatternScreen(rawSteps, 3);
-    if (mode > 0)
-        passRawToDriver(mode);
-    else
-        menuStructure();
+    if (mode > 0) passRawToDriver(mode);
+    else          menuStructure();
 }
 
 void getRawMotorData(void) {
     static const char *names[] = {"Base", "Shoulder", "Elbow"};
 
     clearScreen();
-    printf("%sRAW STEP ENTRY%s\n", BLUE, RESET);
-    printf("    Enter step count and direction for each motor.\n");
-    printf("    Direction: %s1%s = CW  %s0%s = CCW\n\n", RED, RESET, RED, RESET);
+    printHeader("RAW STEP ENTRY");
+    printf("  Enter step count and direction for each motor.\n");
+    printf("  " DIM "Direction:  1 = CW  \xc2\xb7  0 = CCW" RESET "\n\n");
 
     for (int m = 0; m < 3; m++) {
-        printf("    Motor %d %-9s  Steps: ", m + 1, names[m]);
+        printf("  Motor %d  %-9s  steps:  ", m + 1, names[m]);
         if (scanf("%d", &rawSteps[m]) != 1 || rawSteps[m] < 0) {
             clearInputBuffer();
-            printf("    %sInvalid input. Try again.%s\n", RED, RESET);
+            printErr("Invalid step count. Must be a non-negative integer.");
             getRawMotorData();
             return;
         }
-        printf("    Motor %d %-9s  Dir (1=CW, 0=CCW): ", m + 1, names[m]);
+        printf("  Motor %d  %-9s  dir:    ", m + 1, names[m]);
         if (scanf("%d", &rawDirs[m]) != 1 || (rawDirs[m] != 0 && rawDirs[m] != 1)) {
             clearInputBuffer();
-            printf("    %sInvalid direction. Try again.%s\n", RED, RESET);
+            printErr("Invalid direction. Enter 1 (CW) or 0 (CCW).");
             getRawMotorData();
             return;
         }
         printf("\n");
     }
 
-    clearScreen();
-    printf("%sRAW STEP ENTRY%s\n", BLUE, RESET);
-    printf("    %sEntered Values:%s\n", GREEN, RESET);
+    printDivider();
     for (int m = 0; m < 3; m++)
-        printf("    Motor %d %-9s  %d steps  %s\n",
+        printf("  Motor %d  %-9s  " BABY_BLUE "%d steps" RESET "  " DIM "%s" RESET "\n",
                m + 1, names[m], rawSteps[m], rawDirs[m] ? "CW" : "CCW");
-    printf("\n    %s1)%s Confirm and continue\n    %s2)%s Re-enter\n    ",
-           RED, RESET, RED, RESET);
+    printf("\n");
+    printf("  [1]  Confirm\n");
+    printf("  [2]  Re-enter\n\n");
+    printPrompt();
 
     scanf("%d", &choice);
     if (choice != 1) { getRawMotorData(); return; }
 
     int mode = showTickPatternScreen(rawSteps, 3);
-    if (mode > 0)
-        passRawToDriver(mode);
-    else
-        menuStructure();
+    if (mode > 0) passRawToDriver(mode);
+    else          menuStructure();
 }
 
 void rawMovementMenu(void) {
     clearScreen();
-    printf("%sRAW MOVEMENT MENU%s\n", BLUE, RESET);
-    printf("    Bypass inverse kinematics — drive motors directly.\n\n");
-    printf("    %s1)%s Enter step counts\n", RED, RESET);
-    printf("    %s2)%s Enter angles\n", RED, RESET);
-    printf("    %s3)%s Back to Main Menu\n    ", RED, RESET);
+    printHeader("RAW MOVEMENT");
+    printf("  Drive motors directly, bypassing inverse kinematics.\n\n");
+    printf("  [1]  Enter step counts\n");
+    printf("  [2]  Enter angles\n");
+    printf("  [3]  Back to Main Menu\n\n");
+    printPrompt();
 
     if (scanf("%d", &choice) != 1) { clearInputBuffer(); rawMovementMenu(); return; }
     if (choice == 1)      getRawMotorData();
     else if (choice == 2) getRawAngles();
     else if (choice == 3) menuStructure();
-    else rawMovementMenu();
+    else                  rawMovementMenu();
 }
 
 void menuStructure(void) {
     clearScreen();
-    printf("%sMAIN MENU%s\n", BLUE, RESET);
-    printf("    %s1)%s Inverse Kinematics Mode\n", RED, RESET);
-    printf("    %s2)%s Raw Movement Data\n", RED, RESET);
-    printf("    %s3)%s Exit\n    ", RED, RESET);
+    printHeader("MAIN MENU");
+    printf("  [1]  Inverse Kinematics\n");
+    printf("  [2]  Raw Movement\n");
+    printf("  [3]  Exit\n\n");
+    printPrompt();
 
     if (scanf("%d", &choice) != 1) { clearInputBuffer(); menuStructure(); return; }
     if (choice == 1)      inverseKinematicsMenu();
     else if (choice == 2) rawMovementMenu();
-    else if (choice == 3) { printGoodbye(); }
-    else menuStructure();
+    else if (choice == 3) printGoodbye();
+    else                  menuStructure();
 }
 
 int main(void) {
