@@ -107,6 +107,15 @@ Every init, drive, completion, and cleanup event is logged to `activity.log` wit
 
 All three motors (base, shoulder, elbow) move at the same time. Before executing, the program generates a repeating tick pattern and displays it for confirmation.
 
+## Time To Move (TTM)
+
+When a movement is executed, the controller reports a **TTM (time to move)** measured using a monotonic clock (`CLOCK_MONOTONIC`) so it won’t jump if the system time changes.
+
+- **Simultaneous (parallel)**: prints **one total TTM** for the whole coordinated move (all motors stepping together).
+- **Sequential**: prints **one TTM per segment** (each motor’s move, executed one-after-another).
+
+TTM measures the time spent actively driving the stepper pins (direction set + step pulses). It does not include menu navigation or user “think time”.
+
 ### Pattern Generation
 
 The algorithm computes the smallest repeating section that, when tiled, produces exactly the required step count for each motor.
@@ -275,8 +284,14 @@ docker compose build
 ```
 
 This builds:
-- `clicontroller-gpio-sim` — Alpine 3.19 with bash and coreutils. Runs `setup.sh` (creates the fake sysfs directory tree) followed by `monitor.sh` (tails the activity log with color-coded output).
-- `clicontroller-control` — Alpine 3.19 with gcc and musl-dev. Compiles `control.c` at image build time. The entrypoint (`entrypoint.sh`) polls for `/gpio/gpio17/value` to exist before launching the binary, ensuring the simulator is ready.
+- `clicontroller-gpio-sim` — Alpine (see Dockerfile) with bash and coreutils. Runs `setup.sh` (creates the fake sysfs directory tree) followed by `monitor.sh` (tails the activity log with color-coded output).
+- `clicontroller-control` — Alpine (see Dockerfile) with gcc and musl-dev. Compiles `control.c` at image build time. The entrypoint (`entrypoint.sh`) polls for `/gpio/gpio17/value` to exist before launching the binary, ensuring the simulator is ready.
+
+If you’ve changed `control.c` and want to force a clean rebuild:
+
+```bash
+docker compose build --no-cache
+```
 
 **Step 2 — Start the GPIO simulator and pin monitor (Terminal 1):**
 

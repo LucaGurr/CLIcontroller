@@ -6,6 +6,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <dirent.h>
+#include <time.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 
@@ -87,6 +88,29 @@ static void clearScreen(void) {
 static void clearInputBuffer(void) {
     int c;
     while ((c = getchar()) != '\n' && c != EOF);
+}
+
+static double monotonic_seconds(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0.0;
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+}
+
+static void format_ttm(char *buf, size_t n, double seconds) {
+    if (seconds < 0) seconds = 0;
+
+    if (seconds < 1.0) {
+        snprintf(buf, n, "%.0f ms", seconds * 1000.0);
+        return;
+    }
+    if (seconds < 60.0) {
+        snprintf(buf, n, "%.3f s", seconds);
+        return;
+    }
+
+    int minutes = (int)(seconds / 60.0);
+    double rest = seconds - (double)minutes * 60.0;
+    snprintf(buf, n, "%dm %.3fs", minutes, rest);
 }
 
 static void printHeader(const char *title) {
@@ -392,6 +416,8 @@ void driveMotorsSimultaneous(int *step_counts, int *dirs, int n_motors,
     }
     if (section_len == 0) {
         printf("  " YELLOW "No movement required." RESET "\n");
+        log_activity("DONE: Simultaneous | no steps | TTM=0 ms");
+        printf("  " DIM "TTM (total, simultaneous)" RESET "  " BABY_BLUE "0 ms" RESET "\n");
         return;
     }
 
@@ -402,6 +428,8 @@ void driveMotorsSimultaneous(int *step_counts, int *dirs, int n_motors,
         pos += snprintf(log_buf + pos, sizeof(log_buf) - pos,
                         " M%d %s %dsteps |", m + 1, dirs[m] ? "CW" : "CCW", step_counts[m]);
     log_activity("%s", log_buf);
+
+    double t0 = monotonic_seconds();
 
     for (int m = 0; m < n_motors; m++) gpio_write(dir_pins[m], dirs[m]);
     usleep(STEP_DELAY_US);
@@ -416,12 +444,19 @@ void driveMotorsSimultaneous(int *step_counts, int *dirs, int n_motors,
             usleep(STEP_DELAY_US);
         }
 
+    double elapsed = monotonic_seconds() - t0;
+    char ttm_buf[32];
+    format_ttm(ttm_buf, sizeof(ttm_buf), elapsed);
+
     pos = 0;
     pos += snprintf(log_buf + pos, sizeof(log_buf) - pos, "DONE: Simultaneous |");
     for (int m = 0; m < n_motors; m++)
         pos += snprintf(log_buf + pos, sizeof(log_buf) - pos,
                         " M%d(%s) %dsteps |", m + 1, names[m], step_counts[m]);
+    pos += snprintf(log_buf + pos, sizeof(log_buf) - pos, " TTM=%s", ttm_buf);
     log_activity("%s", log_buf);
+
+    printf("\n  " DIM "TTM (total, simultaneous)" RESET "  " BABY_BLUE "%s" RESET "\n", ttm_buf);
 
     for (int m = 0; m < n_motors; m++) free(patterns[m]);
 }
@@ -429,6 +464,15 @@ void driveMotorsSimultaneous(int *step_counts, int *dirs, int n_motors,
 void driveMotorsSequential(int *step_counts, int *dirs, int n_motors,
                            int *step_pins, int *dir_pins) {
     static const char *names[] = {"Base", "Shoulder", "Elbow", "End Effector"};
+
+    int any = 0;
+    for (int m = 0; m < n_motors; m++) if (step_counts[m] != 0) { any = 1; break; }
+    if (!any) {
+        printf("  " YELLOW "No movement required." RESET "\n");
+        log_activity("DONE: Sequential | no steps | TTM=0 ms");
+        printf("  " DIM "TTM (segments, sequential)" RESET "  " BABY_BLUE "0 ms" RESET "\n");
+        return;
+    }
 
     for (int m = 0; m < n_motors; m++) {
         if (step_counts[m] == 0) continue;
@@ -439,17 +483,24 @@ void driveMotorsSequential(int *step_counts, int *dirs, int n_motors,
         printf("  Motor %d  %-9s  %s  \xe2\x86\x92  %d steps\n",
                m + 1, names[m], dirs[m] ? "CW " : "CCW", step_counts[m]);
 
+        double t0 = monotonic_seconds();
+
         gpio_write(dir_pins[m], dirs[m]);
         usleep(STEP_DELAY_US);
-
         for (int i = 0; i < step_counts[m]; i++) {
             gpio_write(step_pins[m], 1);
             usleep(STEP_DELAY_US);
             gpio_write(step_pins[m], 0);
             usleep(STEP_DELAY_US);
         }
+        double elapsed = monotonic_seconds() - t0;
+        char ttm_buf[32];
+        format_ttm(ttm_buf, sizeof(ttm_buf), elapsed);
 
-        log_activity("DONE: Motor %d (%s) | %d steps complete", m + 1, names[m], step_counts[m]);
+        log_activity("DONE: Motor %d (%s) | %d steps complete | TTM=%s",
+                     m + 1, names[m], step_counts[m], ttm_buf);
+        printf("  " DIM "TTM (segment, sequential)" RESET "  %-9s  " BABY_BLUE "%s" RESET "\n",
+               names[m], ttm_buf);
     }
 }
 

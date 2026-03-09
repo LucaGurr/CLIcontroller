@@ -1,4 +1,4 @@
-FROM alpine:3.19
+FROM alpine:3.23
 RUN apk add --no-cache bash coreutils
 COPY setup.sh monitor.sh /
 RUN chmod +x /setup.sh /monitor.sh
