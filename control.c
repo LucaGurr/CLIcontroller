@@ -4,6 +4,10 @@
 #include <unistd.h>
 #include <stdarg.h>
 #include <string.h>
+#include <ctype.h>
+#include <dirent.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 
 #define BABY_BLUE "\x1b[38;2;137;207;240m"  /* RGB(137,207,240) baby blue */
 #define RED       "\x1b[31m"
@@ -33,6 +37,7 @@
 #define DISPLAY_LINE_WIDTH 64
 #define GEARBOX_RATIO      16
 #define RULE_WIDTH         48
+#define SCRIPT_DIR         "scripts"
 
 static const int ALL_PINS[] = {
     MOTOR1_STEP_PIN, MOTOR1_DIR_PIN,
@@ -49,12 +54,21 @@ static const int motorPins[4][2] = {
     {MOTOR4_STEP_PIN, MOTOR4_DIR_PIN}
 };
 
+static const int HAS_GEAR[3] = {0, 1, 1};
+
+enum {
+    SCRIPT_MODE_IK = 0,
+    SCRIPT_MODE_RAW_JOINT = 1,
+    SCRIPT_MODE_RAW_MOTOR = 2
+};
+
 void menuStructure(void);
 void getTargetCoords(void);
 void getCoords(void);
 void getRawMotorData(void);
 void getRawAngles(void);
 void run_selftest(void);
+void scriptLibraryMenu(void);
 
 int choice;
 int lengths      [2] = {500, 525};
@@ -440,7 +454,8 @@ void driveMotorsSequential(int *step_counts, int *dirs, int n_motors,
 }
 
 static void executeDriver(int *step_counts, int *dirs, int n_motors,
-                          int *step_pins, int *dir_pins, int mode) {
+                          int *step_pins, int *dir_pins, int mode,
+                          int return_to_menu) {
     clearScreen();
     printHeader("EXECUTING");
 
@@ -459,10 +474,12 @@ static void executeDriver(int *step_counts, int *dirs, int n_motors,
 
     printf("\n");
     printOk("All motors driven to target!");
-    printf("\n  Press any key to return to Main Menu...\n");
-    clearInputBuffer();
-    getchar();
-    menuStructure();
+    if (return_to_menu) {
+        printf("\n  Press any key to return to Main Menu...\n");
+        clearInputBuffer();
+        getchar();
+        menuStructure();
+    }
 }
 
 void passAnglesToDriver(int mode) {
@@ -473,7 +490,7 @@ void passAnglesToDriver(int mode) {
         step_pins[m]   = motorPins[m][0];
         dir_pins[m]    = motorPins[m][1];
     }
-    executeDriver(step_counts, dirs, 3, step_pins, dir_pins, mode);
+    executeDriver(step_counts, dirs, 3, step_pins, dir_pins, mode, 1);
 }
 
 void passRawToDriver(int mode) {
@@ -482,7 +499,7 @@ void passRawToDriver(int mode) {
         step_pins[m] = motorPins[m][0];
         dir_pins[m]  = motorPins[m][1];
     }
-    executeDriver(rawSteps, rawDirs, 3, step_pins, dir_pins, mode);
+    executeDriver(rawSteps, rawDirs, 3, step_pins, dir_pins, mode, 1);
 }
 
 
@@ -656,7 +673,6 @@ void inverseKinematicsMenu(void) {
 
 void getRawAngles(void) {
     static const char *names[]   = {"Base", "Shoulder", "Elbow"};
-    static const int   has_gear[] = {0, 1, 1};
 
     clearScreen();
     printHeader("RAW ANGLE ENTRY");
@@ -680,7 +696,7 @@ void getRawAngles(void) {
 
     int raw_angle[3];
     for (int m = 0; m < 3; m++) {
-        if (angle_mode == 1 && has_gear[m])
+        if (angle_mode == 1 && HAS_GEAR[m])
             printf("  Motor %d  %-9s  joint angle (deg):  ", m + 1, names[m]);
         else
             printf("  Motor %d  %-9s  motor angle (deg):  ", m + 1, names[m]);
@@ -694,7 +710,7 @@ void getRawAngles(void) {
     }
 
     for (int m = 0; m < 3; m++) {
-        int motor_angle = (angle_mode == 1 && has_gear[m])
+        int motor_angle = (angle_mode == 1 && HAS_GEAR[m])
                           ? raw_angle[m] * GEARBOX_RATIO
                           : raw_angle[m];
         rawDirs[m]  = (motor_angle >= 0) ? 1 : 0;
@@ -703,7 +719,7 @@ void getRawAngles(void) {
 
     printDivider();
     for (int m = 0; m < 3; m++) {
-        if (angle_mode == 1 && has_gear[m])
+        if (angle_mode == 1 && HAS_GEAR[m])
             printf("  Motor %d  %-9s  %4d\xc2\xb0 joint  \xe2\x86\x92  %4d\xc2\xb0 motor  \xe2\x86\x92  "
                    BABY_BLUE "%d steps" RESET "  " DIM "%s" RESET "\n",
                    m + 1, names[m], raw_angle[m],
@@ -785,6 +801,501 @@ void rawMovementMenu(void) {
     else if (choice == 2) getRawAngles();
     else if (choice == 3) menuStructure();
     else                  rawMovementMenu();
+}
+
+static void ensureScriptDir(void) {
+    struct stat st;
+    if (stat(SCRIPT_DIR, &st) != 0) {
+        mkdir(SCRIPT_DIR, 0755);
+    }
+}
+
+static void passAnglesToDriver_batch(int mode) {
+    int step_counts[3], dirs[3], step_pins[3], dir_pins[3];
+    for (int m = 0; m < 3; m++) {
+        dirs[m]        = (angles[m] >= 0) ? 1 : 0;
+        step_counts[m] = (int)((double)abs(angles[m]) * STEPS_PER_REV / 360.0);
+        step_pins[m]   = motorPins[m][0];
+        dir_pins[m]    = motorPins[m][1];
+    }
+    executeDriver(step_counts, dirs, 3, step_pins, dir_pins, mode, 0);
+}
+
+static void loadScriptConfig(const char *path, int *exec_mode_out, int *loop_forever_out) {
+    *exec_mode_out    = SCRIPT_MODE_IK;
+    *loop_forever_out = 0;
+
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+        char *p = line;
+        while (isspace((unsigned char)*p)) p++;
+        if (*p != '#')
+            break;
+
+        char mode_token[32];
+        char loop_token[32];
+
+        if (sscanf(p, "# MODE: %31s", mode_token) == 1) {
+            if (strcmp(mode_token, "IK") == 0)
+                *exec_mode_out = SCRIPT_MODE_IK;
+            else if (strcmp(mode_token, "RAW_JOINT") == 0)
+                *exec_mode_out = SCRIPT_MODE_RAW_JOINT;
+            else if (strcmp(mode_token, "RAW_MOTOR") == 0)
+                *exec_mode_out = SCRIPT_MODE_RAW_MOTOR;
+        } else if (sscanf(p, "# LOOP: %31s", loop_token) == 1) {
+            if (strcmp(loop_token, "ON") == 0)
+                *loop_forever_out = 1;
+            else
+                *loop_forever_out = 0;
+        }
+    }
+
+    fclose(f);
+}
+
+static int runScriptFile_once(const char *path, int exec_mode) {
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        printErr("Could not open script file.");
+        printf("  " DIM "%s" RESET "\n", path);
+        return 0;
+    }
+
+    clearScreen();
+    printHeader("SCRIPT RUNNER");
+    printf("  Script file: " BABY_BLUE "%s" RESET "\n", path);
+    if (exec_mode == SCRIPT_MODE_IK)
+        printf("  Mode: Inverse kinematics (x, y, z)\n");
+    else if (exec_mode == SCRIPT_MODE_RAW_JOINT)
+        printf("  Mode: Raw angles (joint side)\n");
+    else
+        printf("  Mode: Raw angles (motor side)\n");
+    printf("  Using segment lengths: L1 = %d mm  \xc2\xb7  L2 = %d mm\n\n",
+           lengths[0], lengths[1]);
+
+    char line[256];
+    int  line_no   = 0;
+    int  step_idx  = 0;
+
+    while (fgets(line, sizeof(line), f)) {
+        line_no++;
+        char *p = line;
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p == '#' || *p == '\0' || *p == '\n') continue;
+
+        int vals[3];
+        if ((exec_mode == SCRIPT_MODE_IK) &&
+            (p[0] == 'I' || p[0] == 'i') &&
+            (p[1] == 'K' || p[1] == 'k')) {
+            p += 2;
+            while (isspace((unsigned char)*p)) p++;
+        }
+
+        if (sscanf(p, "%d, %d, %d", &vals[0], &vals[1], &vals[2]) != 3) {
+            printf("  " RED "[!]" RESET "  Line %d: could not parse. Skipping.\n", line_no);
+            continue;
+        }
+
+        step_idx++;
+        printf("\n");
+
+        int step_counts[3];
+        int dirs[3];
+        int step_pins[3], dir_pins[3];
+        for (int m = 0; m < 3; m++) {
+            step_pins[m] = motorPins[m][0];
+            dir_pins[m]  = motorPins[m][1];
+        }
+
+        if (exec_mode == SCRIPT_MODE_IK) {
+            int x = vals[0], y = vals[1], z = vals[2];
+            printf("  Step %d: target (x = %d mm, base = %d\xc2\xb0, z = %d mm)\n",
+                   step_idx, x, y, z);
+
+            int local_angles[3];
+            double L1 = (double)lengths[0];
+            double L2 = (double)lengths[1];
+            double xx = (double)x;
+            double zz = (double)z;
+            double dist = sqrt(xx * xx + zz * zz);
+
+            if (!compute_ik(L1, L2, xx, (double)y, zz, local_angles)) {
+                printf("  " RED "[!]" RESET "  Target out of reach (dist = %.0f mm). Skipping.\n", dist);
+                continue;
+            }
+
+            angles[0] = local_angles[0];
+            angles[1] = local_angles[1];
+            angles[2] = local_angles[2];
+
+            printf("  Angles: base " BABY_BLUE "%d" RESET " deg  \xc2\xb7  "
+                   "shoulder " BABY_BLUE "%d" RESET " deg motor  \xc2\xb7  "
+                   "elbow " BABY_BLUE "%d" RESET " deg motor\n",
+                   angles[0], angles[1], angles[2]);
+
+            for (int m = 0; m < 3; m++) {
+                dirs[m]        = (angles[m] >= 0) ? 1 : 0;
+                step_counts[m] = (int)((double)abs(angles[m]) * STEPS_PER_REV / 360.0);
+            }
+        } else {
+            static const char *names[] = {"Base", "Shoulder", "Elbow"};
+            int raw_angle[3];
+            raw_angle[0] = vals[0];
+            raw_angle[1] = vals[1];
+            raw_angle[2] = vals[2];
+
+            printf("  Step %d: raw angles (deg): ", step_idx);
+            printf("%s %d, %s %d, %s %d\n",
+                   names[0], raw_angle[0],
+                   names[1], raw_angle[1],
+                   names[2], raw_angle[2]);
+
+            for (int m = 0; m < 3; m++) {
+                int motor_angle = (exec_mode == SCRIPT_MODE_RAW_JOINT && HAS_GEAR[m])
+                                  ? raw_angle[m] * GEARBOX_RATIO
+                                  : raw_angle[m];
+                dirs[m]        = (motor_angle >= 0) ? 1 : 0;
+                step_counts[m] = (int)((double)abs(motor_angle) * STEPS_PER_REV / 360.0);
+            }
+
+            printDivider();
+            for (int m = 0; m < 3; m++) {
+                int motor_angle = (exec_mode == SCRIPT_MODE_RAW_JOINT && HAS_GEAR[m])
+                                  ? raw_angle[m] * GEARBOX_RATIO
+                                  : raw_angle[m];
+                if (exec_mode == SCRIPT_MODE_RAW_JOINT && HAS_GEAR[m])
+                    printf("  Motor %d  %-9s  %4d\xc2\xb0 joint  \xe2\x86\x92  %4d\xc2\xb0 motor  \xe2\x86\x92  "
+                           BABY_BLUE "%d steps" RESET "  " DIM "%s" RESET "\n",
+                           m + 1, names[m], raw_angle[m],
+                           motor_angle,
+                           step_counts[m], dirs[m] ? "CW" : "CCW");
+                else
+                    printf("  Motor %d  %-9s  %4d\xc2\xb0 motor  \xe2\x86\x92  "
+                           BABY_BLUE "%d steps" RESET "  " DIM "%s" RESET "\n",
+                           m + 1, names[m], raw_angle[m],
+                           step_counts[m], dirs[m] ? "CW" : "CCW");
+            }
+        }
+
+        int mode = showTickPatternScreen(step_counts, 3);
+        if (mode == 0) {
+            printf("\n  Script cancelled by user.\n");
+            fclose(f);
+            return 0;
+        }
+
+        executeDriver(step_counts, dirs, 3, step_pins, dir_pins, mode, 0);
+        printf("\n  Completed step %d.\n", step_idx);
+    }
+
+    fclose(f);
+
+    printf("\n");
+    printDivider();
+    printf("  Script run complete. Total executed steps: " BABY_BLUE "%d" RESET "\n", step_idx);
+    return 1;
+}
+
+static void runScriptFile(const char *filename) {
+    char path[256];
+    snprintf(path, sizeof(path), "%s/%s", SCRIPT_DIR, filename);
+
+    int exec_mode, loop_forever;
+    loadScriptConfig(path, &exec_mode, &loop_forever);
+
+    clearScreen();
+    printHeader("SCRIPT RUN");
+    printf("  Script file: " BABY_BLUE "%s" RESET "\n", path);
+    printf("  Mode: ");
+    if (exec_mode == SCRIPT_MODE_IK)
+        printf("Inverse kinematics (x, y, z)\n");
+    else if (exec_mode == SCRIPT_MODE_RAW_JOINT)
+        printf("Raw angles (joint side)\n");
+    else
+        printf("Raw angles (motor side)\n");
+    printf("  Loop: %s\n\n", loop_forever ? "forever" : "once");
+
+    int ok = 1;
+    do {
+        ok = runScriptFile_once(path, exec_mode);
+        if (!ok) break;
+        if (loop_forever) {
+            printf("\n  " YELLOW "Restarting script from beginning (loop mode)." RESET "\n");
+        }
+    } while (loop_forever);
+
+    printf("\n  Press any key to return to Script Library...\n");
+    clearInputBuffer();
+    getchar();
+    scriptLibraryMenu();
+}
+
+static void createScriptInteractive(void) {
+    clearScreen();
+    printHeader("NEW SCRIPT");
+    ensureScriptDir();
+
+    char name[64];
+    printf("  Enter script name (no spaces):  ");
+    if (scanf("%63s", name) != 1) {
+        clearInputBuffer();
+        scriptLibraryMenu();
+        return;
+    }
+
+    char filename[128];
+    const char *ext = ".robo";
+    size_t len = strlen(name);
+    if (len >= 5 && strcmp(name + len - 5, ext) == 0) {
+        snprintf(filename, sizeof(filename), "%s", name);
+    } else {
+        snprintf(filename, sizeof(filename), "%s%s", name, ext);
+    }
+
+    char path[256];
+    snprintf(path, sizeof(path), "%s/%s", SCRIPT_DIR, filename);
+
+    FILE *f = fopen(path, "w");
+    if (!f) {
+        printErr("Unable to create script file.");
+        printf("  " DIM "%s" RESET "\n", path);
+        printf("\n  Press any key to return to Script Library...\n");
+        clearInputBuffer();
+        getchar();
+        scriptLibraryMenu();
+        return;
+    }
+
+    fprintf(f, "# Roboscript (.robo) generated via UI\n");
+    fprintf(f, "# Script name: %s\n", name);
+
+    clearScreen();
+    printHeader("NEW SCRIPT MODE");
+    printf("  Script name: " BABY_BLUE "%s" RESET "\n\n", name);
+    printf("  Choose how this script should be interpreted when run:\n\n");
+    printf("  " DIM "[1]" RESET "  IK positions        (each line: x, y, z)\n");
+    printf("  " DIM "[2]" RESET "  Raw angles (joint)  (each line: base, shoulder, elbow degrees)\n");
+    printf("  " DIM "[3]" RESET "  Raw angles (motor)  (each line: base, shoulder, elbow motor degrees)\n\n");
+    printPrompt();
+
+    int mode_choice;
+    if (scanf("%d", &mode_choice) != 1 || mode_choice < 1 || mode_choice > 3) {
+        clearInputBuffer();
+        printErr("Invalid mode.");
+        fclose(f);
+        remove(path);
+        printf("\n  Press any key to return to Script Library...\n");
+        clearInputBuffer();
+        getchar();
+        scriptLibraryMenu();
+        return;
+    }
+
+    int exec_mode = SCRIPT_MODE_IK;
+    if (mode_choice == 1)      exec_mode = SCRIPT_MODE_IK;
+    else if (mode_choice == 2) exec_mode = SCRIPT_MODE_RAW_JOINT;
+    else                       exec_mode = SCRIPT_MODE_RAW_MOTOR;
+
+    clearScreen();
+    printHeader("NEW SCRIPT LOOP MODE");
+    printf("  Script name: " BABY_BLUE "%s" RESET "\n\n", name);
+    printf("  Choose how this script should repeat when run:\n\n");
+    printf("  " DIM "[1]" RESET "  Run once\n");
+    printf("  " DIM "[2]" RESET "  Loop forever\n\n");
+    printPrompt();
+
+    int loop_choice;
+    if (scanf("%d", &loop_choice) != 1 || (loop_choice != 1 && loop_choice != 2)) {
+        clearInputBuffer();
+        printErr("Invalid loop option.");
+        fclose(f);
+        remove(path);
+        printf("\n  Press any key to return to Script Library...\n");
+        clearInputBuffer();
+        getchar();
+        scriptLibraryMenu();
+        return;
+    }
+
+    int loop_forever = (loop_choice == 2);
+
+    fprintf(f, "# MODE: %s\n",
+            exec_mode == SCRIPT_MODE_IK       ? "IK" :
+            exec_mode == SCRIPT_MODE_RAW_JOINT ? "RAW_JOINT" : "RAW_MOTOR");
+    fprintf(f, "# LOOP: %s\n", loop_forever ? "ON" : "OFF");
+
+    if (exec_mode == SCRIPT_MODE_IK)
+        fprintf(f, "# Each line: IK x, y, z\n\n");
+    else
+        fprintf(f, "# Each line: base_deg, shoulder_deg, elbow_deg\n\n");
+
+    int count;
+    if (exec_mode == SCRIPT_MODE_IK)
+        printf("  How many points in this script?  ");
+    else
+        printf("  How many moves in this script?   ");
+    if (scanf("%d", &count) != 1 || count <= 0) {
+        clearInputBuffer();
+        printErr("Invalid count.");
+        fclose(f);
+        remove(path);
+        printf("\n  Press any key to return to Script Library...\n");
+        clearInputBuffer();
+        getchar();
+        scriptLibraryMenu();
+        return;
+    }
+
+    for (int i = 0; i < count; i++) {
+        int x, y, z;
+        if (exec_mode == SCRIPT_MODE_IK) {
+            printf("  Point %d (x, y, z):  ", i + 1);
+            if (scanf("%d, %d, %d", &x, &y, &z) != 3) {
+                clearInputBuffer();
+                printErr("Invalid format. Expected: x, y, z");
+                fclose(f);
+                remove(path);
+                printf("\n  Press any key to return to Script Library...\n");
+                clearInputBuffer();
+                getchar();
+                scriptLibraryMenu();
+                return;
+            }
+            fprintf(f, "IK %d, %d, %d\n", x, y, z);
+        } else {
+            printf("  Target %d (base, shoulder, elbow degrees):  ", i + 1);
+            if (scanf("%d, %d, %d", &x, &y, &z) != 3) {
+                clearInputBuffer();
+                printErr("Invalid format. Expected: base, shoulder, elbow");
+                fclose(f);
+                remove(path);
+                printf("\n  Press any key to return to Script Library...\n");
+                clearInputBuffer();
+                getchar();
+                scriptLibraryMenu();
+                return;
+            }
+            fprintf(f, "%d, %d, %d\n", x, y, z);
+        }
+    }
+
+    fclose(f);
+    printDivider();
+    printOk("Script saved.");
+    printf("\n  Saved to: " BABY_BLUE "%s" RESET "\n", path);
+    printf("\n  Press any key to return to Script Library...\n");
+    clearInputBuffer();
+    getchar();
+    scriptLibraryMenu();
+}
+
+void scriptLibraryMenu(void) {
+    ensureScriptDir();
+
+    DIR *dir = opendir(SCRIPT_DIR);
+    if (!dir) {
+        clearScreen();
+        printHeader("SCRIPT LIBRARY");
+        printErr("Could not open script directory.");
+        printf("  Expected at: " BABY_BLUE "%s" RESET "\n", SCRIPT_DIR);
+        printf("\n  Press any key to return to Main Menu...\n");
+        clearInputBuffer();
+        getchar();
+        menuStructure();
+        return;
+    }
+
+    char filenames[64][256];
+    int  count = 0;
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL && count < 64) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+
+        const char *dot = strrchr(entry->d_name, '.');
+        if (!dot || strcmp(dot, ".robo") != 0)
+            continue;
+
+        snprintf(filenames[count], sizeof(filenames[count]), "%s", entry->d_name);
+        count++;
+    }
+    closedir(dir);
+
+    clearScreen();
+    printHeader("SCRIPT LIBRARY");
+    printf("  Standard script directory: " BABY_BLUE "%s" RESET "\n\n", SCRIPT_DIR);
+
+    if (count == 0) {
+        printf("  " YELLOW "No .robo scripts found." RESET "\n");
+        printf("  Use the option below to create one.\n\n");
+    } else {
+        printf("  Available scripts:\n\n");
+        for (int i = 0; i < count; i++) {
+            printf("  " DIM "[%d]" RESET "  %s\n", i + 1, filenames[i]);
+        }
+        printf("\n");
+    }
+
+    int create_opt = count + 1;
+    int delete_opt = count + 2;
+    int back_opt   = count + 3;
+
+    printf("  " DIM "[%d]" RESET "  New script (UI)\n", create_opt);
+    printf("  " DIM "[%d]" RESET "  Delete a script\n", delete_opt);
+    printf("  " DIM "[%d]" RESET "  Back to Main Menu\n\n", back_opt);
+    printPrompt();
+
+    if (scanf("%d", &choice) != 1) {
+        clearInputBuffer();
+        scriptLibraryMenu();
+        return;
+    }
+
+    if (choice >= 1 && choice <= count) {
+        runScriptFile(filenames[choice - 1]);
+    } else if (choice == create_opt) {
+        createScriptInteractive();
+    } else if (choice == delete_opt) {
+        if (count == 0) {
+            printErr("No scripts to delete.");
+            printf("  Press any key to return...\n");
+            clearInputBuffer();
+            getchar();
+            scriptLibraryMenu();
+            return;
+        }
+        printf("  Enter script number to delete (0 to cancel): ");
+        int del;
+        if (scanf("%d", &del) != 1) {
+            clearInputBuffer();
+            scriptLibraryMenu();
+            return;
+        }
+        if (del <= 0 || del > count) {
+            scriptLibraryMenu();
+            return;
+        }
+        char path[256];
+        snprintf(path, sizeof(path), "%s/%s", SCRIPT_DIR, filenames[del - 1]);
+        if (remove(path) != 0) {
+            printErr("Failed to delete script file.");
+            printf("  " DIM "%s" RESET "\n", path);
+        } else {
+            printOk("Script deleted.");
+        }
+        printf("\n  Press any key to refresh Script Library...\n");
+        clearInputBuffer();
+        getchar();
+        scriptLibraryMenu();
+    } else if (choice == back_opt) {
+        menuStructure();
+    } else {
+        scriptLibraryMenu();
+    }
 }
 
 /* ----- Selftest: IK and tick patterns ----- */
@@ -984,14 +1495,16 @@ void menuStructure(void) {
     printf("  " DIM "[1]" RESET "  Inverse Kinematics\n");
     printf("  " DIM "[2]" RESET "  Raw Movement\n");
     printf("  " DIM "[3]" RESET "  Self-test\n");
-    printf("  " DIM "[4]" RESET "  Exit\n\n");
+    printf("  " DIM "[4]" RESET "  Script Library / Batch Mode\n");
+    printf("  " DIM "[5]" RESET "  Exit\n\n");
     printPrompt();
 
     if (scanf("%d", &choice) != 1) { clearInputBuffer(); menuStructure(); return; }
     if (choice == 1)      inverseKinematicsMenu();
     else if (choice == 2) rawMovementMenu();
     else if (choice == 3) run_selftest();
-    else if (choice == 4) printGoodbye();
+    else if (choice == 4) scriptLibraryMenu();
+    else if (choice == 5) printGoodbye();
     else                  menuStructure();
 }
 

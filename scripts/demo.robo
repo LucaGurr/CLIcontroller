@@ -1,0 +1,8 @@
+# Roboscript (.robo) generated via UI
+# Script name: demo
+# MODE: RAW_MOTOR
+# LOOP: ON
+# Each line: base_deg, shoulder_deg, elbow_deg
+
+100, -100, 100
+-100, 100, -100
